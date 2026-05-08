@@ -20,6 +20,7 @@ var kiroModels = []kiroModelSpec{
 	{KiroID: "claude-sonnet-4.6", AnthropicID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ContextWindow: 1_000_000, MaxOutput: 64_000},
 	{KiroID: "claude-opus-4.5", AnthropicID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", ContextWindow: 200_000, MaxOutput: 64_000},
 	{KiroID: "claude-opus-4.6", AnthropicID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextWindow: 1_000_000, MaxOutput: 128_000},
+	{KiroID: "claude-opus-4.7", AnthropicID: "claude-opus-4-7", Name: "Claude Opus 4.7", ContextWindow: 1_000_000, MaxOutput: 128_000},
 	{KiroID: "claude-haiku-4.5", AnthropicID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", ContextWindow: 200_000, MaxOutput: 64_000},
 }
 
@@ -36,6 +37,9 @@ func MapToKiroModel(model string) (kiroID string, contextWindow int, err error) 
 	if strings.Contains(lower, "opus") {
 		if strings.Contains(lower, "4-5") || strings.Contains(lower, "4.5") {
 			return "claude-opus-4.5", 200_000, nil
+		}
+		if strings.Contains(lower, "4-7") || strings.Contains(lower, "4.7") {
+			return "claude-opus-4.7", 1_000_000, nil
 		}
 		return "claude-opus-4.6", 1_000_000, nil
 	}

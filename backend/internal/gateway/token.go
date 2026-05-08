@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +73,11 @@ func (m *tokenManager) ensureValidToken(ctx context.Context, account *sdk.Accoun
 	return m.doRefresh(ctx, account)
 }
 
+// forceRefresh 跳过 expires_at 检查，强制刷新 token。
+func (m *tokenManager) forceRefresh(ctx context.Context, account *sdk.Account) (map[string]string, error) {
+	return m.doRefresh(ctx, account)
+}
+
 func (m *tokenManager) doRefresh(ctx context.Context, account *sdk.Account) (map[string]string, error) {
 	val, _ := m.locks.LoadOrStore(account.ID, &accountRefreshState{})
 	state := val.(*accountRefreshState)
@@ -84,11 +88,12 @@ func (m *tokenManager) doRefresh(ctx context.Context, account *sdk.Account) (map
 	if state.lastToken != "" && state.lastToken == account.Credentials["access_token"] {
 		if state.lastError != nil && time.Since(state.lastErrorAt) < refreshCooldown {
 			m.logger.Warn("token refresh in cooldown", "account_id", account.ID)
-			return nil, nil
+			return nil, fmt.Errorf("%w: refresh in cooldown, last error: %v", ErrAccountDead, state.lastError)
 		}
 	}
 
 	currentToken := account.Credentials["access_token"]
+	oldRefreshToken := account.Credentials["refresh_token"]
 
 	var lastErr error
 	for attempt := range refreshMaxRetries + 1 {
@@ -99,13 +104,10 @@ func (m *tokenManager) doRefresh(ctx context.Context, account *sdk.Account) (map
 		var resp *tokenResponse
 		var err error
 
-		switch account.Type {
-		case "oauth":
-			resp, err = m.refreshSocial(ctx, account)
-		case "idc":
+		if account.Credentials["client_id"] != "" && account.Credentials["client_secret"] != "" {
 			resp, err = m.refreshIdC(ctx, account)
-		default:
-			return nil, fmt.Errorf("unsupported account type for refresh: %s", account.Type)
+		} else {
+			resp, err = m.refreshSocial(ctx, account)
 		}
 
 		if err != nil {
@@ -115,7 +117,7 @@ func (m *tokenManager) doRefresh(ctx context.Context, account *sdk.Account) (map
 				state.lastToken = currentToken
 				state.lastError = err
 				state.lastErrorAt = time.Now()
-				return nil, nil
+				return nil, fmt.Errorf("%w: %v", ErrAccountDead, err)
 			}
 			m.logger.Warn("refresh attempt failed", "account_id", account.ID, "attempt", attempt+1, "error", err)
 			continue
@@ -126,6 +128,9 @@ func (m *tokenManager) doRefresh(ctx context.Context, account *sdk.Account) (map
 		}
 		if resp.RefreshToken != "" {
 			updated["refresh_token"] = resp.RefreshToken
+			if resp.RefreshToken != oldRefreshToken {
+				m.logger.Info("refresh_token rotated", "account_id", account.ID)
+			}
 		}
 		if resp.ProfileArn != "" {
 			updated["profile_arn"] = resp.ProfileArn
@@ -154,7 +159,7 @@ func (m *tokenManager) doRefresh(ctx context.Context, account *sdk.Account) (map
 	state.lastToken = currentToken
 	state.lastError = lastErr
 	state.lastErrorAt = time.Now()
-	return nil, nil
+	return nil, fmt.Errorf("token refresh failed after %d retries: %v", refreshMaxRetries+1, lastErr)
 }
 
 func (m *tokenManager) refreshSocial(ctx context.Context, account *sdk.Account) (*tokenResponse, error) {
@@ -174,6 +179,9 @@ func (m *tokenManager) refreshSocial(ctx context.Context, account *sdk.Account) 
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("User-Agent", fmt.Sprintf("KiroIDE-%s-%s", m.config.KiroVersion, machineID))
 	req.Header.Set("Connection", "close")
+	if m.config.KiroCommit != "" {
+		req.Header.Set("x-amzn-kiro-commit", m.config.KiroCommit)
+	}
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -249,8 +257,3 @@ func resolveAuthRegion(account *sdk.Account) string {
 	return DefaultRegion
 }
 
-func isNonRetryableRefreshError(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "invalid_grant") &&
-		strings.Contains(msg, "Invalid refresh token provided")
-}

@@ -13,6 +13,7 @@ type headerConfig struct {
 	KiroVersion   string
 	NodeVersion   string
 	SystemVersion string
+	KiroCommit    string
 }
 
 func defaultHeaderConfig(ctx sdk.PluginContext) headerConfig {
@@ -20,6 +21,7 @@ func defaultHeaderConfig(ctx sdk.PluginContext) headerConfig {
 		KiroVersion:   DefaultKiroVersion,
 		NodeVersion:   DefaultNodeVersion,
 		SystemVersion: "darwin#24.6.0",
+		KiroCommit:    DefaultKiroCommit,
 	}
 	if ctx != nil && ctx.Config() != nil {
 		if v := ctx.Config().GetString("kiro_version"); v != "" {
@@ -27,6 +29,9 @@ func defaultHeaderConfig(ctx sdk.PluginContext) headerConfig {
 		}
 		if v := ctx.Config().GetString("node_version"); v != "" {
 			cfg.NodeVersion = v
+		}
+		if v := ctx.Config().GetString("kiro_commit"); v != "" {
+			cfg.KiroCommit = v
 		}
 	}
 	return cfg
@@ -50,6 +55,9 @@ func buildKiroHeaders(account *sdk.Account, region, machineID string, cfg header
 	h.Set("Host", host)
 	h.Set("amz-sdk-invocation-id", uuid.New().String())
 	h.Set("amz-sdk-request", "attempt=1; max=3")
+	if cfg.KiroCommit != "" {
+		h.Set("x-amzn-kiro-commit", cfg.KiroCommit)
+	}
 
 	token := account.Credentials["access_token"]
 	if account.Type == "api_key" {

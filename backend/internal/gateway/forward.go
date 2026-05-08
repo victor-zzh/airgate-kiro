@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -40,13 +41,16 @@ func (g *KiroGateway) forwardOAuth(ctx context.Context, req *sdk.ForwardRequest,
 
 	updatedCreds, err := g.tokenMgr.ensureValidToken(ctx, req.Account)
 	if err != nil {
-		logger.Error("token refresh failed", "error", err)
-		return accountDeadOutcome("token refresh failed: " + err.Error()), nil
+		if errors.Is(err, ErrAccountDead) {
+			logger.Error("account dead: refresh token invalid", "error", err)
+			return accountDeadOutcome(err.Error()), nil
+		}
+		logger.Warn("token refresh failed, trying with current token", "error", err)
 	}
 
 	accessToken := req.Account.Credentials["access_token"]
 	if accessToken == "" {
-		return accountDeadOutcome("no access_token after refresh"), nil
+		return accountDeadOutcome("no access_token available"), nil
 	}
 
 	outcome := g.doForward(ctx, req, logger, start)

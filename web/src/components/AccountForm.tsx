@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { cssVar } from '@airgate/theme';
 
 export interface AccountFormProps {
@@ -11,11 +11,12 @@ export interface AccountFormProps {
   onBatchModeChange?: (isBatch: boolean) => void;
   onBatchImport?: (accounts: Array<{ name: string; type: string; credentials: Record<string, string> }>) => Promise<{ imported: number; failed: number }>;
   oauth?: {
-    start: () => Promise<{ authorizeURL: string; state: string }>;
+    start: () => Promise<{ authorizeURL: string; state: string; autoCallback?: boolean }>;
     exchange: (callbackURL: string) => Promise<{
       accountType: string;
       accountName: string;
       credentials: Record<string, string>;
+      status?: string;
     }>;
   };
 }
@@ -61,7 +62,7 @@ const cardActiveStyle: React.CSSProperties = {
   backgroundColor: cssVar('primarySubtle'),
 };
 
-type AccountType = 'oauth' | 'idc' | 'api_key';
+type AccountType = 'oauth' | 'api_key';
 
 export function AccountForm({
   credentials,
@@ -70,73 +71,138 @@ export function AccountForm({
   accountType,
   onAccountTypeChange,
   onSuggestedName,
+  onBatchModeChange,
+  onBatchImport,
   oauth,
 }: AccountFormProps) {
   const currentType = (accountType || 'oauth') as AccountType;
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchJson, setBatchJson] = useState('');
+  const [batchStatus, setBatchStatus] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const [authorizeURL, setAuthorizeURL] = useState('');
   const [callbackURL, setCallbackURL] = useState('');
   const [oauthLoading, setOauthLoading] = useState(false);
   const [oauthStatus, setOauthStatus] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const [deviceAuth, setDeviceAuth] = useState<{ verificationURI: string; userCode: string; sessionID: string } | null>(null);
+  const [polling, setPolling] = useState(false);
+  const [showManualPaste, setShowManualPaste] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionRef = useRef<string>('');
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setPolling(false);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const handleOAuthResult = useCallback((result: { accountType: string; accountName: string; credentials: Record<string, string> }) => {
+    if (result.accountType === '__device_auth__') {
+      const uri = result.credentials?.verification_uri;
+      const code = result.credentials?.user_code;
+      const sid = result.credentials?.session_id;
+      if (uri && code && sid) {
+        setDeviceAuth({ verificationURI: uri, userCode: code, sessionID: sid });
+        setAuthorizeURL('');
+        setCallbackURL('');
+        setShowManualPaste(false);
+        setOauthStatus({ type: 'info', text: `请在浏览器中打开验证链接，输入验证码 ${code} 完成授权。` });
+        return;
+      }
+    }
+    onAccountTypeChange?.(result.accountType || 'oauth');
+    onChange({ ...credentials, ...result.credentials });
+    if (result.accountName) onSuggestedName?.(result.accountName);
+    setOauthStatus({ type: 'success', text: '授权成功！凭证已自动填充，请点击创建完成添加。' });
+    setAuthorizeURL('');
+    setShowManualPaste(false);
+    setDeviceAuth(null);
+  }, [onAccountTypeChange, onChange, credentials, onSuggestedName]);
 
   const selectType = useCallback((type: AccountType) => {
     onAccountTypeChange?.(type);
     setAuthorizeURL('');
     setCallbackURL('');
     setOauthStatus(null);
-  }, [onAccountTypeChange]);
+    setShowManualPaste(false);
+    stopPolling();
+  }, [onAccountTypeChange, stopPolling]);
 
   // ── OAuth 浏览器流程 ──
   const startOAuth = useCallback(async () => {
     if (!oauth) return;
+    stopPolling();
     setOauthLoading(true);
+    setShowManualPaste(false);
     setOauthStatus({ type: 'info', text: '正在生成授权链接...' });
     try {
       const result = await oauth.start();
       setAuthorizeURL(result.authorizeURL);
       setCallbackURL('');
-      setOauthStatus({ type: 'success', text: '授权链接已生成，请在浏览器中完成登录后复制地址栏 URL。' });
+      sessionRef.current = result.state;
+
+      if (result.autoCallback) {
+        setOauthStatus({ type: 'info', text: '请复制授权链接在浏览器中打开，登录后将自动获取凭证...' });
+        setPolling(true);
+        pollRef.current = setInterval(async () => {
+          try {
+            const pollResult = await oauth.exchange('poll:' + sessionRef.current);
+            if (pollResult.status === 'complete') {
+              stopPolling();
+              handleOAuthResult(pollResult);
+            } else if (pollResult.status === 'device_auth') {
+              stopPolling();
+              handleOAuthResult(pollResult);
+            } else if (pollResult.status === 'unavailable') {
+              stopPolling();
+              setShowManualPaste(true);
+              setOauthStatus({ type: 'info', text: '自动捕获不可用，请手动粘贴回调 URL。' });
+            }
+          } catch {
+            // 轮询错误不中断，继续等待
+          }
+        }, 2000);
+
+        // 5 分钟超时
+        setTimeout(() => {
+          if (pollRef.current) {
+            stopPolling();
+            setShowManualPaste(true);
+            setOauthStatus({ type: 'info', text: '自动捕获超时，请手动粘贴回调 URL。' });
+          }
+        }, 5 * 60 * 1000);
+      } else {
+        setShowManualPaste(true);
+        setOauthStatus({ type: 'info', text: '请复制授权链接在浏览器中打开，登录后请复制地址栏 URL 粘贴到下方。' });
+      }
     } catch (error) {
       setOauthStatus({ type: 'error', text: error instanceof Error ? error.message : '生成授权链接失败' });
     } finally {
       setOauthLoading(false);
     }
-  }, [oauth]);
+  }, [oauth, stopPolling, handleOAuthResult]);
 
   const submitOAuthCallback = useCallback(async () => {
     if (!oauth || !callbackURL.trim()) return;
+    stopPolling();
     setOauthLoading(true);
     setOauthStatus({ type: 'info', text: '正在完成授权交换...' });
     try {
       const result = await oauth.exchange(callbackURL.trim());
-
-      // BuilderID 设备授权：显示验证链接和验证码
-      if (result.accountType === '__device_auth__') {
-        const uri = result.credentials?.verification_uri;
-        const code = result.credentials?.user_code;
-        const sid = result.credentials?.session_id;
-        if (uri && code && sid) {
-          setDeviceAuth({ verificationURI: uri, userCode: code, sessionID: sid });
-          setAuthorizeURL('');
-          setCallbackURL('');
-          setOauthStatus({ type: 'info', text: `请在浏览器中打开验证链接，输入验证码 ${code} 完成授权。` });
-          return;
-        }
-      }
-
-      onAccountTypeChange?.(result.accountType || 'oauth');
-      onChange({ ...credentials, ...result.credentials });
-      if (result.accountName) onSuggestedName?.(result.accountName);
-      setOauthStatus({ type: 'success', text: '授权成功！凭证已自动填充，请点击创建完成添加。' });
-      setAuthorizeURL('');
-      setDeviceAuth(null);
+      handleOAuthResult(result);
     } catch (error) {
       setOauthStatus({ type: 'error', text: error instanceof Error ? error.message : '授权交换失败' });
     } finally {
       setOauthLoading(false);
     }
-  }, [oauth, callbackURL, onAccountTypeChange, onChange, credentials, onSuggestedName]);
+  }, [oauth, callbackURL, stopPolling, handleOAuthResult]);
 
   const completeDeviceAuth = useCallback(async () => {
     if (!deviceAuth || !oauth) return;
@@ -203,8 +269,7 @@ export function AccountForm({
       {mode === 'create' && (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           {([
-            ['oauth', 'OAuth 授权', '通过浏览器登录 Kiro'],
-            ['idc', 'IdC (AWS SSO)', '手动填写 IdC 凭证'],
+            ['oauth', 'OAuth 授权', '浏览器登录或批量导入凭证'],
             ['api_key', 'API Key', 'Kiro API Key 直连'],
           ] as const).map(([type, label, desc]) => (
             <div
@@ -222,21 +287,50 @@ export function AccountForm({
       {/* Social OAuth - 浏览器授权 */}
       {currentType === 'oauth' && oauth && mode === 'create' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button type="button" onClick={startOAuth} disabled={oauthLoading} style={primaryBtn(oauthLoading)}>
-              {oauthLoading ? '处理中...' : '生成授权链接'}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button type="button" onClick={() => { setBatchMode(false); onBatchModeChange?.(false); startOAuth(); }} disabled={oauthLoading || polling || batchMode} style={primaryBtn(oauthLoading || polling || batchMode)}>
+              {polling ? '等待授权中...' : oauthLoading ? '处理中...' : '生成授权链接'}
             </button>
+            {onBatchImport && (
+              <button type="button" onClick={() => { setBatchMode(!batchMode); onBatchModeChange?.(!batchMode); stopPolling(); setOauthStatus(null); }} style={outlineBtn(false)}>
+                {batchMode ? '返回授权' : '批量导入'}
+              </button>
+            )}
             {authorizeURL && (
               <button type="button" onClick={copyURL} disabled={oauthLoading} style={outlineBtn(oauthLoading)}>
                 复制链接
               </button>
             )}
+            {polling && (
+              <button type="button" onClick={() => { stopPolling(); setShowManualPaste(true); setOauthStatus({ type: 'info', text: '已切换为手动模式，请粘贴回调 URL。' }); }} style={outlineBtn(false)}>
+                手动粘贴
+              </button>
+            )}
           </div>
 
-          {authorizeURL && !deviceAuth && (
+          {/* 自动捕获等待中的动画指示 */}
+          {polling && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 0.75rem', borderRadius: cssVar('radiusMd'),
+              backgroundColor: `color-mix(in oklab, ${cssVar('info')} 8%, transparent)`,
+              fontSize: '0.8rem', color: cssVar('info'),
+            }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: cssVar('info'), animation: 'pulse 1.5s ease-in-out infinite' }} />
+              正在等待浏览器授权完成，凭证将自动填充...
+              <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+            </div>
+          )}
+
+          {/* 手动粘贴回调 URL（自动捕获不可用时或用户主动切换） */}
+          {showManualPaste && !deviceAuth && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label style={labelStyle}>授权链接（在浏览器中打开）</label>
-              <input type="text" readOnly value={authorizeURL} style={{ ...inputStyle, fontSize: '0.75rem' }} onClick={(e) => (e.target as HTMLInputElement).select()} />
+              {authorizeURL && (
+                <>
+                  <label style={labelStyle}>授权链接（已在新窗口中打开）</label>
+                  <input type="text" readOnly value={authorizeURL} style={{ ...inputStyle, fontSize: '0.75rem' }} onClick={(e) => (e.target as HTMLInputElement).select()} />
+                </>
+              )}
 
               <label style={labelStyle}>回调 URL（登录后复制浏览器地址栏的完整 URL）</label>
               <input
@@ -282,8 +376,8 @@ export function AccountForm({
               color: statusColors[oauthStatus.type],
               backgroundColor: `color-mix(in oklab, ${statusColors[oauthStatus.type]} 10%, transparent)`,
               borderWidth: '1px',
-      borderStyle: 'solid',
-      borderColor: `color-mix(in oklab, ${statusColors[oauthStatus.type]} 25%, transparent)`,
+              borderStyle: 'solid',
+              borderColor: `color-mix(in oklab, ${statusColors[oauthStatus.type]} 25%, transparent)`,
             }}>
               {oauthStatus.text}
             </div>
@@ -323,17 +417,114 @@ export function AccountForm({
         </div>
       )}
 
-      {/* IdC */}
-      {currentType === 'idc' && (
+      {/* 批量导入（OAuth 创建模式下） */}
+      {currentType === 'oauth' && mode === 'create' && onBatchImport && batchMode && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <label style={labelStyle}>Refresh Token</label>
-          <input type="password" value={credentials.refresh_token || ''} onChange={(e) => onChange({ ...credentials, refresh_token: e.target.value })} style={inputStyle} required />
-          <label style={labelStyle}>Client ID</label>
-          <input type="text" value={credentials.client_id || ''} onChange={(e) => onChange({ ...credentials, client_id: e.target.value })} style={inputStyle} required />
-          <label style={labelStyle}>Client Secret</label>
-          <input type="password" value={credentials.client_secret || ''} onChange={(e) => onChange({ ...credentials, client_secret: e.target.value })} style={inputStyle} required />
-          <label style={labelStyle}>AWS Region</label>
-          <input type="text" placeholder="us-east-1" value={credentials.region || ''} onChange={(e) => onChange({ ...credentials, region: e.target.value })} style={inputStyle} />
+          <label style={labelStyle}>JSON 批量导入</label>
+              <textarea
+                rows={10}
+                placeholder={`粘贴 JSON 数组，每项包含 refresh_token、client_id、client_secret，例如：
+[
+  {
+    "name": "账号1",
+    "refresh_token": "...",
+    "client_id": "...",
+    "client_secret": "...",
+    "region": "us-east-1"
+  },
+  {
+    "name": "账号2",
+    "refresh_token": "...",
+    "client_id": "...",
+    "client_secret": "..."
+  }
+]
+
+也支持 OAuth 账号格式（无需 client_id/client_secret）：
+{ "name": "...", "type": "oauth", "refresh_token": "..." }`}
+                value={batchJson}
+                onChange={(e) => { setBatchJson(e.target.value); setBatchStatus(null); }}
+                style={{ ...inputStyle, fontFamily: 'monospace', fontSize: '0.8rem', resize: 'vertical' }}
+              />
+              {(() => {
+                if (!batchJson.trim()) return null;
+                try {
+                  const parsed = JSON.parse(batchJson.trim());
+                  const items = Array.isArray(parsed) ? parsed : [parsed];
+                  const valid = items.filter((it: Record<string, string>) => it.refresh_token);
+                  return (
+                    <div style={{ fontSize: '0.8rem', color: cssVar('textSecondary') }}>
+                      解析到 {valid.length} 个有效账号{valid.length < items.length ? `（${items.length - valid.length} 个缺少 refresh_token 已跳过）` : ''}
+                    </div>
+                  );
+                } catch {
+                  return <div style={{ fontSize: '0.8rem', color: cssVar('danger') }}>JSON 格式错误</div>;
+                }
+              })()}
+              <button
+                type="button"
+                disabled={batchLoading || !batchJson.trim()}
+                style={{
+                  ...inputStyle,
+                  cursor: batchLoading || !batchJson.trim() ? 'not-allowed' : 'pointer',
+                  backgroundColor: cssVar('primary'),
+                  color: cssVar('primaryForeground'),
+                  borderWidth: 0,
+                  borderStyle: 'none',
+                  fontWeight: 500,
+                  width: 'auto',
+                  opacity: batchLoading || !batchJson.trim() ? 0.6 : 1,
+                }}
+                onClick={async () => {
+                  if (!onBatchImport) return;
+                  setBatchLoading(true);
+                  setBatchStatus({ type: 'info', text: '正在导入...' });
+                  try {
+                    const parsed = JSON.parse(batchJson.trim());
+                    const items: Record<string, string>[] = Array.isArray(parsed) ? parsed : [parsed];
+                    const accounts = items
+                      .filter((it) => it.refresh_token)
+                      .map((it, i) => {
+                        const creds: Record<string, string> = { refresh_token: it.refresh_token };
+                        if (it.client_id) creds.client_id = it.client_id;
+                        if (it.client_secret) creds.client_secret = it.client_secret;
+                        if (it.region) creds.region = it.region;
+                        return {
+                          name: it.name || `Kiro-${i + 1}`,
+                          type: 'oauth',
+                          credentials: creds,
+                        };
+                      });
+                    if (accounts.length === 0) {
+                      setBatchStatus({ type: 'error', text: '没有找到有效账号（需包含 refresh_token）' });
+                      return;
+                    }
+                    const result = await onBatchImport(accounts);
+                    setBatchStatus({ type: 'success', text: `导入完成：成功 ${result.imported} 个，失败 ${result.failed} 个` });
+                    if (result.imported > 0) setBatchJson('');
+                  } catch (err) {
+                    setBatchStatus({ type: 'error', text: err instanceof Error ? err.message : '导入失败' });
+                  } finally {
+                    setBatchLoading(false);
+                  }
+                }}
+              >
+                {batchLoading ? '导入中...' : '开始导入'}
+              </button>
+              {batchStatus && (
+                <div style={{
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: cssVar('radiusMd'),
+                  fontSize: '0.8rem',
+                  color: statusColors[batchStatus.type],
+                  backgroundColor: `color-mix(in oklab, ${statusColors[batchStatus.type]} 10%, transparent)`,
+                  borderWidth: '1px',
+                  borderStyle: 'solid',
+                  borderColor: `color-mix(in oklab, ${statusColors[batchStatus.type]} 25%, transparent)`,
+                }}>
+                  {batchStatus.text}
+                </div>
+              )}
         </div>
       )}
 

@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -87,6 +89,28 @@ func (s *oauthSessionStore) remove(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+}
+
+func (s *oauthSessionStore) startCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.mu.Lock()
+				now := time.Now()
+				for k, v := range s.sessions {
+					if now.Sub(v.CreatedAt) > oauthSessionTTL {
+						delete(s.sessions, k)
+					}
+				}
+				s.mu.Unlock()
+			}
+		}
+	}()
 }
 
 func (s *oauthSessionStore) findByState(state string) (string, *OAuthSession, bool) {
@@ -243,9 +267,14 @@ func exchangeCallbackByURL(ctx context.Context, store *oauthSessionStore, rawCal
 		creds["client_secret"] = tokenResp.ClientSecret
 	}
 
+	email := tokenResp.Email
+	if email == "" {
+		email = extractEmailFromJWT(tokenResp.AccessToken)
+	}
+
 	return &ExchangeCallbackResponse{
 		Credentials: creds,
-		Email:       tokenResp.Email,
+		Email:       email,
 	}, nil
 }
 
@@ -459,14 +488,17 @@ func pollDeviceToken(ctx context.Context, store *oauthSessionStore, sessionID st
 		"refresh_token": tokenResp.RefreshToken,
 		"client_id":     sess.ClientID,
 		"client_secret": sess.ClientSecret,
-		"auth_method":   "idc",
+		"auth_method":   "oauth",
 		"region":        sess.IDCRegion,
 	}
 	if tokenResp.ExpiresIn > 0 {
 		creds["expires_at"] = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339)
 	}
 
-	return &ExchangeCallbackResponse{Credentials: creds}, nil
+	return &ExchangeCallbackResponse{
+		Credentials: creds,
+		Email:       extractEmailFromJWT(tokenResp.AccessToken),
+	}, nil
 }
 
 // exchangeIDCCode 通过 IdC OIDC token 端点交换授权码（保留用于可能的 Authorization Code 流程）。
@@ -514,14 +546,17 @@ func exchangeIDCCode(ctx context.Context, code string, sess *OAuthSession, httpC
 		"refresh_token": tokenResp.RefreshToken,
 		"client_id":     sess.ClientID,
 		"client_secret": sess.ClientSecret,
-		"auth_method":   "idc",
+		"auth_method":   "oauth",
 		"region":        sess.IDCRegion,
 	}
 	if tokenResp.ExpiresIn > 0 {
 		creds["expires_at"] = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339)
 	}
 
-	return &ExchangeCallbackResponse{Credentials: creds}, nil
+	return &ExchangeCallbackResponse{
+		Credentials: creds,
+		Email:       extractEmailFromJWT(tokenResp.AccessToken),
+	}, nil
 }
 
 type kiroTokenExchangeResponse struct {
@@ -604,17 +639,7 @@ func exchangeCodeForToken(ctx context.Context, code, codeVerifier, redirectURI s
 }
 
 func resolveAuthMethod(loginOption string, token *kiroTokenExchangeResponse) string {
-	switch strings.ToLower(loginOption) {
-	case "social", "google", "github":
-		return "oauth"
-	case "builderid", "awsidc", "iam", "idc", "internal", "enterprise", "external-idp":
-		return "idc"
-	default:
-		if token.ClientID != "" && token.ClientSecret != "" {
-			return "idc"
-		}
-		return "oauth"
-	}
+	return "oauth"
 }
 
 func normalizeCallbackURL(raw string) string {
@@ -631,6 +656,32 @@ func normalizeCallbackURL(raw string) string {
 	return raw
 }
 
+// extractEmailFromJWT 从 JWT token 的 claims 中提取邮箱。
+func extractEmailFromJWT(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		// 尝试标准 base64
+		payload, err = base64.RawStdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return ""
+		}
+	}
+	var claims map[string]any
+	if json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	for _, key := range []string{"email", "upn", "preferred_username", "login_hint"} {
+		if v, ok := claims[key].(string); ok && v != "" && strings.Contains(v, "@") {
+			return v
+		}
+	}
+	return ""
+}
+
 func randomBase64URL(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -643,3 +694,117 @@ func computeS256Challenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
+
+// ── Callback Listener ──
+
+// callbackListener 在 localhost:3128 监听 OAuth 回调，自动捕获授权码。
+type callbackListener struct {
+	logger   *slog.Logger
+	server   *http.Server
+	running  bool
+	mu       sync.Mutex
+	captured sync.Map // state -> full callback URL
+}
+
+func newCallbackListener(logger *slog.Logger) *callbackListener {
+	return &callbackListener{logger: logger}
+}
+
+func (cl *callbackListener) start() bool {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if cl.running {
+		return true
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", cl.handleCallback)
+
+	cl.server = &http.Server{
+		Addr:    "127.0.0.1:3128",
+		Handler: mux,
+	}
+
+	ln, err := net.Listen("tcp", cl.server.Addr)
+	if err != nil {
+		cl.logger.Warn("callback listener unavailable, manual paste required", "addr", cl.server.Addr, "error", err)
+		return false
+	}
+
+	cl.running = true
+	go func() {
+		if err := cl.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			cl.logger.Warn("callback listener error", "error", err)
+		}
+		cl.mu.Lock()
+		cl.running = false
+		cl.mu.Unlock()
+	}()
+
+	cl.logger.Info("callback listener started", "addr", cl.server.Addr)
+	return true
+}
+
+func (cl *callbackListener) stop() {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if !cl.running || cl.server == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cl.server.Shutdown(ctx)
+	cl.running = false
+}
+
+func (cl *callbackListener) handleCallback(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		http.Error(w, "missing state", http.StatusBadRequest)
+		return
+	}
+
+	fullURL := kiroCallbackBaseURL + r.URL.RequestURI()
+	cl.captured.Store(state, fullURL)
+
+	statePrefix := state
+	if len(statePrefix) > 8 {
+		statePrefix = statePrefix[:8]
+	}
+	cl.logger.Info("oauth callback captured", "state_prefix", statePrefix)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(callbackSuccessHTML))
+}
+
+func (cl *callbackListener) getResult(state string) (string, bool) {
+	val, ok := cl.captured.LoadAndDelete(state)
+	if !ok {
+		return "", false
+	}
+	return val.(string), true
+}
+
+func (cl *callbackListener) isRunning() bool {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	return cl.running
+}
+
+const callbackSuccessHTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>授权完成</title><style>
+body{font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f8f9fa}
+.card{background:#fff;border-radius:12px;padding:2.5rem 3rem;box-shadow:0 2px 12px rgba(0,0,0,.08);text-align:center;max-width:400px}
+.icon{font-size:3rem;margin-bottom:1rem}
+h1{color:#16a34a;font-size:1.25rem;margin:0 0 .5rem;font-weight:600}
+p{color:#6b7280;margin:0;line-height:1.5}
+.hint{margin-top:1.25rem;font-size:.8rem;color:#9ca3af}
+</style></head><body>
+<div class="card">
+<div class="icon">&#10003;</div>
+<h1>Authorization Complete</h1>
+<p>Credentials will be auto-filled in the Airgate panel.</p>
+<p class="hint">You can close this window.</p>
+</div>
+<script>window.close()</script>
+</body></html>`

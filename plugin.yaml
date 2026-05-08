@@ -55,9 +55,9 @@ gateway:
       output_price: 0
       cache_price: 0
   account_types:
-    - key: social
-      label: Social OAuth
-      description: 使用 Social OAuth RefreshToken 认证
+    - key: oauth
+      label: OAuth
+      description: 通过浏览器 OAuth 或 IdC (BuilderID) 认证
       fields:
         - key: refresh_token
           label: Refresh Token
@@ -79,45 +79,16 @@ gateway:
           type: text
           required: false
           placeholder: 自动获取
-        - key: region
-          label: AWS Region
-          type: text
-          required: false
-          placeholder: us-east-1
-        - key: machine_id
-          label: Machine ID
-          type: text
-          required: false
-        - key: proxy_url
-          label: 代理地址
-          type: text
-          required: false
-    - key: idc
-      label: IdC (AWS SSO)
-      description: 使用 AWS IAM Identity Center 认证
-      fields:
-        - key: refresh_token
-          label: Refresh Token
-          type: password
-          required: true
         - key: client_id
-          label: Client ID
+          label: Client ID (IdC)
           type: text
-          required: true
+          required: false
+          placeholder: IdC 账号自动填充
         - key: client_secret
-          label: Client Secret
-          type: password
-          required: true
-        - key: access_token
-          label: Access Token
+          label: Client Secret (IdC)
           type: password
           required: false
-          placeholder: 自动刷新
-        - key: expires_at
-          label: 过期时间
-          type: text
-          required: false
-          placeholder: 自动填充
+          placeholder: IdC 账号自动填充
         - key: region
           label: AWS Region
           type: text
