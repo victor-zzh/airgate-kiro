@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone airgate-sdk (go.work replace)
+        run: git clone --depth 1 https://github.com/DouDOU-start/airgate-sdk.git ../airgate-sdk
+
+      - name: Create go.work
+        run: |
+          cat > go.work <<'EOF'
+          go 1.25.7
+
+          use (
+              ./backend
+              ../airgate-sdk
+          )
+          EOF
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build @airgate/theme
+        run: cd ../airgate-sdk/frontend && npm ci && npm run build
+
+      - name: Build frontend
+        run: cd web && npm install && npm run build
+
+      - name: Embed web dist
+        run: |
+          rm -rf backend/internal/gateway/webdist
+          cp -r web/dist backend/internal/gateway/webdist
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build backend binary
+        env:
+          GOTOOLCHAIN: local
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Injecting PluginVersion=${VERSION}"
+          mkdir -p bin
+          cd backend && go build -buildvcs=false -trimpath \
+            -ldflags "-X 'github.com/DouDOU-start/airgate-kiro/backend/internal/gateway.PluginVersion=${VERSION}'" \
+            -o ../bin/gateway-kiro-${{ matrix.goos }}-${{ matrix.goarch }} .
+
+      - name: Generate SHA256
+        run: |
+          cd bin && sha256sum gateway-kiro-${{ matrix.goos }}-${{ matrix.goarch }} \
+            > gateway-kiro-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-kiro-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            bin/gateway-kiro-${{ matrix.goos }}-${{ matrix.goarch }}
+            bin/gateway-kiro-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
+          retention-days: 1
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/gateway-kiro-*

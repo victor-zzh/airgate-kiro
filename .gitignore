@@ -1,0 +1,30 @@
+# Dependencies
+web/node_modules/
+
+# Build output
+web/dist/
+backend/internal/gateway/webdist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go workspace (local only)
+go.work
+go.work.sum

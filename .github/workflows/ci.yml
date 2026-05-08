@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  ci:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone airgate-sdk (go.work replace)
+        run: git clone --depth 1 https://github.com/DouDOU-start/airgate-sdk.git ../airgate-sdk
+
+      - name: Create go.work
+        run: |
+          cat > go.work <<'EOF'
+          go 1.25.7
+
+          use (
+              ./backend
+              ../airgate-sdk
+          )
+          EOF
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build @airgate/theme
+        run: cd ../airgate-sdk/frontend && npm ci && npm run build
+
+      - name: Build frontend
+        run: cd web && npm install && npm run build
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Run tests
+        run: cd backend && go test ./...
+
+      - name: Build binary
+        run: cd backend && go build -o /dev/null .

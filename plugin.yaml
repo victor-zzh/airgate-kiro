@@ -1,0 +1,147 @@
+id: gateway-kiro
+name: Kiro 网关
+version: 1.0.0
+description: Kiro (AWS CodeWhisperer) 反代网关，兼容 Anthropic Messages API
+author: airgate
+type: gateway
+min_core_version: 1.0.0
+dependencies: []
+frontend_widgets:
+  - slot: account-form
+    entry_file: index.js
+    title: 账号表单
+gateway:
+  platform: kiro
+  mode: simple
+  routes:
+    - method: POST
+      path: /v1/messages
+      description: Messages API
+    - method: POST
+      path: /v1/messages/count_tokens
+      description: Token 计数
+    - method: GET
+      path: /v1/models
+      description: 模型列表
+  models:
+    - id: claude-sonnet-4-5-20250929
+      name: Claude Sonnet 4.5
+      max_tokens: 200000
+      input_price: 0
+      output_price: 0
+      cache_price: 0
+    - id: claude-sonnet-4-6
+      name: Claude Sonnet 4.6
+      max_tokens: 1000000
+      input_price: 0
+      output_price: 0
+      cache_price: 0
+    - id: claude-opus-4-5-20251101
+      name: Claude Opus 4.5
+      max_tokens: 200000
+      input_price: 0
+      output_price: 0
+      cache_price: 0
+    - id: claude-opus-4-6
+      name: Claude Opus 4.6
+      max_tokens: 1000000
+      input_price: 0
+      output_price: 0
+      cache_price: 0
+    - id: claude-haiku-4-5-20251001
+      name: Claude Haiku 4.5
+      max_tokens: 200000
+      input_price: 0
+      output_price: 0
+      cache_price: 0
+  account_types:
+    - key: social
+      label: Social OAuth
+      description: 使用 Social OAuth RefreshToken 认证
+      fields:
+        - key: refresh_token
+          label: Refresh Token
+          type: password
+          required: true
+          placeholder: 从 Kiro IDE 提取
+        - key: access_token
+          label: Access Token
+          type: password
+          required: false
+          placeholder: 自动刷新
+        - key: expires_at
+          label: 过期时间
+          type: text
+          required: false
+          placeholder: 自动填充
+        - key: profile_arn
+          label: Profile ARN
+          type: text
+          required: false
+          placeholder: 自动获取
+        - key: region
+          label: AWS Region
+          type: text
+          required: false
+          placeholder: us-east-1
+        - key: machine_id
+          label: Machine ID
+          type: text
+          required: false
+        - key: proxy_url
+          label: 代理地址
+          type: text
+          required: false
+    - key: idc
+      label: IdC (AWS SSO)
+      description: 使用 AWS IAM Identity Center 认证
+      fields:
+        - key: refresh_token
+          label: Refresh Token
+          type: password
+          required: true
+        - key: client_id
+          label: Client ID
+          type: text
+          required: true
+        - key: client_secret
+          label: Client Secret
+          type: password
+          required: true
+        - key: access_token
+          label: Access Token
+          type: password
+          required: false
+          placeholder: 自动刷新
+        - key: expires_at
+          label: 过期时间
+          type: text
+          required: false
+          placeholder: 自动填充
+        - key: region
+          label: AWS Region
+          type: text
+          required: false
+          placeholder: us-east-1
+        - key: machine_id
+          label: Machine ID
+          type: text
+          required: false
+        - key: proxy_url
+          label: 代理地址
+          type: text
+          required: false
+    - key: api_key
+      label: Kiro API Key
+      description: 使用 Kiro API Key 直接访问
+      fields:
+        - key: kiro_api_key
+          label: Kiro API Key
+          type: password
+          required: true
+          placeholder: ksk_...
+        - key: region
+          label: AWS Region
+          type: text
+          required: false
+          placeholder: us-east-1
