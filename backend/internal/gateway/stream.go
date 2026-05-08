@@ -110,8 +110,11 @@ func streamKiroToSSE(ctx context.Context, body io.Reader, w http.ResponseWriter,
 	// message_stop
 	conv.emitSSE("message_stop", `{"type":"message_stop"}`)
 
+	applyCacheToUsage(conv.usage, convertCtx)
+	fillUsageCost(conv.usage)
+
 	return sdk.ForwardOutcome{
-		Kind: sdk.OutcomeSuccess,
+		Kind:     sdk.OutcomeSuccess,
 		Upstream: sdk.UpstreamResponse{StatusCode: http.StatusOK},
 		Usage:    conv.usage,
 	}
@@ -214,6 +217,8 @@ func (c *SSEConverter) handleToolUse(payload []byte) {
 	if !c.started {
 		c.emitMessageStart()
 	}
+
+	c.recordFirstToken()
 
 	// 恢复原始工具名
 	name := tu.Name
@@ -452,6 +457,9 @@ func bufferKiroResponse(ctx context.Context, body io.Reader, w http.ResponseWrit
 		Model:        convertCtx.AnthropicModel,
 		FirstTokenMs: time.Since(start).Milliseconds(),
 	}
+
+	applyCacheToUsage(usage, convertCtx)
+	fillUsageCost(usage)
 
 	return sdk.ForwardOutcome{
 		Kind:     sdk.OutcomeSuccess,

@@ -26,6 +26,8 @@ type ConvertContext struct {
 	KiroModelID    string
 	AnthropicModel string
 	ContextWindow  int
+	SystemPrompt   string // 用于 cache simulation
+	ToolsJSON      string // 用于 cache simulation
 }
 
 type convertConfig struct {
@@ -41,15 +43,16 @@ func convertRequest(body []byte, account *sdk.Account, cfg convertConfig, logger
 		return nil, nil, err
 	}
 
+	conversationID := extractConversationID(parsed)
+	systemPrompt := extractSystemPrompt(parsed)
+	thinkingPrefix := buildThinkingPrefix(parsed)
+
 	convCtx := &ConvertContext{
 		KiroModelID:    kiroID,
 		AnthropicModel: model,
 		ContextWindow:  ctxWin,
+		SystemPrompt:   systemPrompt,
 	}
-
-	conversationID := extractConversationID(parsed)
-	systemPrompt := extractSystemPrompt(parsed)
-	thinkingPrefix := buildThinkingPrefix(parsed)
 	messages := parsed.Get("messages").Array()
 
 	logger.Debug("convert_input",
@@ -90,6 +93,7 @@ func convertRequest(body []byte, account *sdk.Account, cfg convertConfig, logger
 	// 转换 tools
 	tools, toolNameMap := convertTools(parsed.Get("tools").Array())
 	convCtx.ToolNameMap = toolNameMap
+	convCtx.ToolsJSON = parsed.Get("tools").Raw
 	if len(toolNameMap) > 0 {
 		logger.Debug("convert_tool_names_truncated", "truncated_count", len(toolNameMap))
 	}
@@ -410,8 +414,13 @@ func convertImageBlock(block gjson.Result) map[string]any {
 	if mediaType == "" {
 		mediaType = "image/png"
 	}
+	// Kiro 要求短格式名（"png"），不接受完整 MIME 类型（"image/png"）
+	format := mediaType
+	if idx := strings.IndexByte(format, '/'); idx >= 0 && idx < len(format)-1 {
+		format = format[idx+1:]
+	}
 	return map[string]any{
-		"format": mediaType,
+		"format": format,
 		"source": map[string]any{
 			"bytes": data,
 		},
