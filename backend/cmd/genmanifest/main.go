@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/DouDOU-start/airgate-kiro/backend/internal/gateway"
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 const generatedComment = "# 本文件由 backend/cmd/genmanifest 自动生成，请勿手工修改。\n\n"
@@ -44,13 +44,11 @@ type routeDef struct {
 }
 
 type modelInfo struct {
-	ID               string  `yaml:"id"`
-	Name             string  `yaml:"name"`
-	ContextWindow    int     `yaml:"context_window"`
-	MaxOutputTokens  int     `yaml:"max_output_tokens"`
-	InputPrice       float64 `yaml:"input_price"`
-	OutputPrice      float64 `yaml:"output_price"`
-	CachedInputPrice float64 `yaml:"cached_input_price,omitempty"`
+	ID              string   `yaml:"id"`
+	Name            string   `yaml:"name"`
+	ContextWindow   int      `yaml:"context_window"`
+	MaxOutputTokens int      `yaml:"max_output_tokens"`
+	Capabilities    []string `yaml:"capabilities,omitempty"`
 }
 
 type accountType struct {
@@ -169,13 +167,11 @@ func convertModels(models []sdk.ModelInfo) []modelInfo {
 	items := make([]modelInfo, 0, len(models))
 	for _, model := range models {
 		items = append(items, modelInfo{
-			ID:               model.ID,
-			Name:             model.Name,
-			ContextWindow:    model.ContextWindow,
-			MaxOutputTokens:  model.MaxOutputTokens,
-			InputPrice:       model.InputPrice,
-			OutputPrice:      model.OutputPrice,
-			CachedInputPrice: model.CachedInputPrice,
+			ID:              model.ID,
+			Name:            model.Name,
+			ContextWindow:   model.ContextWindow,
+			MaxOutputTokens: model.MaxOutputTokens,
+			Capabilities:    model.Capabilities,
 		})
 	}
 	return items

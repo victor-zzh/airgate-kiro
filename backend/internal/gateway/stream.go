@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 	"github.com/google/uuid"
 )
 
@@ -45,7 +45,7 @@ func newSSEConverter(w http.ResponseWriter, convertCtx *ConvertContext, start ti
 		flusher:    flusher,
 		convertCtx: convertCtx,
 		messageID:  "msg_" + uuid.New().String()[:24],
-		usage:      &sdk.Usage{Model: convertCtx.AnthropicModel},
+		usage:      newTokenUsage(convertCtx.AnthropicModel, 0, 0, 0, 0),
 		startTime:  start,
 	}
 }
@@ -104,7 +104,7 @@ func streamKiroToSSE(ctx context.Context, body io.Reader, w http.ResponseWriter,
 	// message_delta
 	conv.emitSSE("message_delta", fmt.Sprintf(
 		`{"type":"message_delta","delta":{"stop_reason":"%s"},"usage":{"output_tokens":%d}}`,
-		stopReason, conv.usage.OutputTokens,
+		stopReason, usageMetricInt(conv.usage, usageMetricOutputTokens),
 	))
 
 	// message_stop
@@ -245,7 +245,7 @@ func (c *SSEConverter) handleToolUse(payload []byte) {
 			`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":%s}}`,
 			c.blockIndex, jsonString(tu.Input),
 		))
-		c.usage.OutputTokens += estimateTokens(tu.Input)
+		addUsageOutputTokens(c.usage, estimateTokens(tu.Input))
 	}
 
 	// 工具调用结束
@@ -264,14 +264,14 @@ func (c *SSEConverter) handleContextUsage(payload []byte) {
 	if err != nil {
 		return
 	}
-	c.usage.InputTokens = int(cu.ContextUsagePercentage * float64(c.convertCtx.ContextWindow) / 100.0)
+	setUsageInputTokens(c.usage, int(cu.ContextUsagePercentage*float64(c.convertCtx.ContextWindow)/100.0))
 }
 
 func (c *SSEConverter) emitMessageStart() {
 	c.started = true
 	c.emitSSE("message_start", fmt.Sprintf(
 		`{"type":"message_start","message":{"id":"%s","type":"message","role":"assistant","model":"%s","content":[],"stop_reason":null,"usage":{"input_tokens":%d,"output_tokens":0}}}`,
-		c.messageID, c.convertCtx.AnthropicModel, c.usage.InputTokens,
+		c.messageID, c.convertCtx.AnthropicModel, usageMetricInt(c.usage, usageMetricInputTokens),
 	))
 }
 
@@ -341,7 +341,7 @@ func (c *SSEConverter) emitTextDelta(text string) {
 		`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":%s}}`,
 		c.blockIndex, jsonString(text),
 	))
-	c.usage.OutputTokens += estimateTokens(text)
+	addUsageOutputTokens(c.usage, estimateTokens(text))
 }
 
 func (c *SSEConverter) emitThinkingDelta(text string) {
@@ -451,12 +451,7 @@ func bufferKiroResponse(ctx context.Context, body io.Reader, w http.ResponseWrit
 		w.Write(respBody)
 	}
 
-	usage := &sdk.Usage{
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-		Model:        convertCtx.AnthropicModel,
-		FirstTokenMs: time.Since(start).Milliseconds(),
-	}
+	usage := newTokenUsage(convertCtx.AnthropicModel, inputTokens, outputTokens, 0, time.Since(start).Milliseconds())
 
 	applyCacheToUsage(usage, convertCtx)
 	fillUsageCost(usage)

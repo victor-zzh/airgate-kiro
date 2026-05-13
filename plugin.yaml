@@ -29,9 +29,15 @@ config:
     type: string
     required: false
 frontend_widgets:
-  - slot: account-form
+  - slot: account-create
     entry_file: index.js
-    title: 账号表单
+    title: 创建账号表单
+  - slot: account-edit
+    entry_file: index.js
+    title: 编辑账号表单
+  - slot: account-usage-window
+    entry_file: index.js
+    title: 账号用量窗口
 gateway:
   platform: kiro
   mode: simple
@@ -50,44 +56,44 @@ gateway:
       name: Claude Sonnet 4.5
       context_window: 200000
       max_output_tokens: 64000
-      input_price: 3
-      output_price: 15
-      cached_input_price: 0.3
+      capabilities:
+        - chat
+        - reasoning
     - id: claude-sonnet-4-6
       name: Claude Sonnet 4.6
       context_window: 1000000
       max_output_tokens: 64000
-      input_price: 3
-      output_price: 15
-      cached_input_price: 0.3
+      capabilities:
+        - chat
+        - reasoning
     - id: claude-opus-4-5-20251101
       name: Claude Opus 4.5
       context_window: 200000
       max_output_tokens: 64000
-      input_price: 5
-      output_price: 25
-      cached_input_price: 0.5
+      capabilities:
+        - chat
+        - reasoning
     - id: claude-opus-4-6
       name: Claude Opus 4.6
       context_window: 1000000
       max_output_tokens: 128000
-      input_price: 5
-      output_price: 25
-      cached_input_price: 0.5
+      capabilities:
+        - chat
+        - reasoning
     - id: claude-opus-4-7
       name: Claude Opus 4.7
       context_window: 1000000
       max_output_tokens: 128000
-      input_price: 5
-      output_price: 25
-      cached_input_price: 0.5
+      capabilities:
+        - chat
+        - reasoning
     - id: claude-haiku-4-5-20251001
       name: Claude Haiku 4.5
       context_window: 200000
       max_output_tokens: 64000
-      input_price: 1
-      output_price: 5
-      cached_input_price: 0.1
+      capabilities:
+        - chat
+        - reasoning
   account_types:
     - key: oauth
       label: OAuth

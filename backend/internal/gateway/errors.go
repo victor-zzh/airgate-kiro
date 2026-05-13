@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 var ErrAccountDead = errors.New("account dead")

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 type kiroModelSpec struct {
@@ -74,27 +74,79 @@ func fillUsageCost(usage *sdk.Usage) {
 		return
 	}
 	p := lookupPricing(usage.Model)
-	model := sdk.ModelInfo{
-		InputPrice:           p.InputPrice,
-		OutputPrice:          p.OutputPrice,
-		CachedInputPrice:     p.CachedPrice,
-		CacheCreationPrice:   p.CacheCreationPrice,
-		CacheCreation1hPrice: p.CacheCreation1hPrice,
+	inputTokens := usageMetricInt(usage, usageMetricInputTokens)
+	outputTokens := usageMetricInt(usage, usageMetricOutputTokens)
+	cachedInputTokens := usageMetricInt(usage, usageMetricCachedInputTokens)
+
+	inputCost := tokenCost(inputTokens, p.InputPrice)
+	cachedCost := tokenCost(cachedInputTokens, p.CachedPrice)
+	outputCost := tokenCost(outputTokens, p.OutputPrice)
+
+	setUsageMetric(usage, sdk.UsageMetric{
+		Key:         usageMetricInputTokens,
+		Label:       "输入 Token",
+		Kind:        "token",
+		Unit:        "token",
+		Value:       float64(inputTokens),
+		AccountCost: inputCost,
+		Currency:    usageCurrencyUSD,
+		Metadata:    priceMetadata(p.InputPrice),
+	})
+	setUsageMetric(usage, sdk.UsageMetric{
+		Key:         usageMetricCachedInputTokens,
+		Label:       "缓存输入 Token",
+		Kind:        "token",
+		Unit:        "token",
+		Value:       float64(cachedInputTokens),
+		AccountCost: cachedCost,
+		Currency:    usageCurrencyUSD,
+		Metadata:    priceMetadata(p.CachedPrice),
+	})
+	setUsageMetric(usage, sdk.UsageMetric{
+		Key:         usageMetricOutputTokens,
+		Label:       "输出 Token",
+		Kind:        "token",
+		Unit:        "token",
+		Value:       float64(outputTokens),
+		AccountCost: outputCost,
+		Currency:    usageCurrencyUSD,
+		Metadata:    priceMetadata(p.OutputPrice),
+	})
+	setUsageCostDetail(usage, sdk.UsageCostDetail{
+		Key:         usageCostInput,
+		Label:       "输入 Token",
+		AccountCost: inputCost,
+		Currency:    usageCurrencyUSD,
+		Metadata:    priceMetadata(p.InputPrice),
+	})
+	setUsageCostDetail(usage, sdk.UsageCostDetail{
+		Key:         usageCostCachedInput,
+		Label:       "缓存输入 Token",
+		AccountCost: cachedCost,
+		Currency:    usageCurrencyUSD,
+		Metadata:    priceMetadata(p.CachedPrice),
+	})
+	setUsageCostDetail(usage, sdk.UsageCostDetail{
+		Key:         usageCostOutput,
+		Label:       "输出 Token",
+		AccountCost: outputCost,
+		Currency:    usageCurrencyUSD,
+		Metadata:    priceMetadata(p.OutputPrice),
+	})
+}
+
+func tokenCost(tokens int, pricePerMillion float64) float64 {
+	if tokens <= 0 || pricePerMillion <= 0 {
+		return 0
 	}
-	cost := sdk.CalculateCost(sdk.CostInput{
-		InputTokens:       usage.InputTokens,
-		OutputTokens:      usage.OutputTokens,
-		CachedInputTokens: usage.CachedInputTokens,
-	}, model)
-	usage.InputCost = cost.InputCost
-	usage.OutputCost = cost.OutputCost
-	usage.CachedInputCost = cost.CachedInputCost
-	usage.CacheCreationCost = cost.CacheCreationCost
-	usage.InputPrice = p.InputPrice
-	usage.OutputPrice = p.OutputPrice
-	usage.CachedInputPrice = p.CachedPrice
-	usage.CacheCreationPrice = p.CacheCreationPrice
-	usage.CacheCreation1hPrice = p.CacheCreation1hPrice
+	return float64(tokens) * pricePerMillion / 1_000_000
+}
+
+func priceMetadata(price float64) map[string]string {
+	return map[string]string{
+		"unit_price": fmt.Sprintf("%.10g", price),
+		"unit":       "USD/1M tokens",
+	}
 }
 
 // MapToKiroModel 将 Anthropic 模型名映射到 Kiro 模型 ID 和上下文窗口大小。
@@ -135,15 +187,12 @@ func MapToAnthropicModel(kiroID string) string {
 func allModelInfos() []sdk.ModelInfo {
 	out := make([]sdk.ModelInfo, len(kiroModels))
 	for i, m := range kiroModels {
-		pricing := lookupPricing(m.AnthropicID)
 		out[i] = sdk.ModelInfo{
-			ID:               m.AnthropicID,
-			Name:             m.Name,
-			ContextWindow:    m.ContextWindow,
-			MaxOutputTokens:  m.MaxOutput,
-			InputPrice:       pricing.InputPrice,
-			OutputPrice:      pricing.OutputPrice,
-			CachedInputPrice: pricing.CachedPrice,
+			ID:              m.AnthropicID,
+			Name:            m.Name,
+			ContextWindow:   m.ContextWindow,
+			MaxOutputTokens: m.MaxOutput,
+			Capabilities:    []string{sdk.ModelCapChat, sdk.ModelCapReasoning},
 		}
 	}
 	return out

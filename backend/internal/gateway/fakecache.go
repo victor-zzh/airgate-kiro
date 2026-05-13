@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 // promptCacheTracker 模拟 Anthropic prompt cache 行为。
 // Kiro 不返回缓存命中信息，但底层 Claude 实际有 prompt cache。
 // 通过追踪 system prompt + tools 的 hash，估算缓存命中比例，
-// 将 InputTokens 拆分为 CachedInputTokens（按 cache read 计价）和非缓存部分。
+// 将输入 Token 拆分为缓存命中部分（按 cache read 计价）和非缓存部分。
 type promptCacheTracker struct {
 	mu    sync.Mutex
 	cache map[string]*cacheEntry
@@ -25,9 +25,9 @@ type cacheEntry struct {
 }
 
 const (
-	cacheTTL       = 5 * time.Minute
-	cacheHitRate   = 0.90
-	cleanupPeriod  = 2 * time.Minute
+	cacheTTL      = 5 * time.Minute
+	cacheHitRate  = 0.90
+	cleanupPeriod = 2 * time.Minute
 )
 
 var globalCacheTracker = &promptCacheTracker{
@@ -76,22 +76,22 @@ func hashCacheKey(systemPrompt, toolsJSON string) string {
 
 // applyCacheToUsage 将缓存模拟结果写入 Usage。
 func applyCacheToUsage(usage *sdk.Usage, convCtx *ConvertContext) {
-	if usage == nil || convCtx == nil || usage.InputTokens <= 0 {
+	inputTokens := usageMetricInt(usage, usageMetricInputTokens)
+	if usage == nil || convCtx == nil || inputTokens <= 0 {
 		return
 	}
 	cacheHit := globalCacheTracker.track(convCtx.SystemPrompt, convCtx.ToolsJSON)
-	nonCached, cached := applyCacheSimulation(usage.InputTokens, cacheHit)
-	usage.InputTokens = nonCached
-	usage.CachedInputTokens = cached
+	nonCached, cached := applyCacheSimulation(inputTokens, cacheHit)
+	setUsageTokens(usage, nonCached, usageMetricInt(usage, usageMetricOutputTokens), cached)
 }
 
-// applyCacheSimulation 根据缓存命中状态拆分 InputTokens。
+// applyCacheSimulation 根据缓存命中状态拆分输入 Token。
 //
-// 缓存命中：将 cacheHitRate 比例的 input 标记为 CachedInputTokens（按 cache read 0.1x 计价），
-// 剩余部分保持为非缓存 InputTokens（1x 计价）。
+// 缓存命中：将 cacheHitRate 比例的输入标记为缓存输入（按 cache read 0.1x 计价），
+// 剩余部分保持为非缓存输入（1x 计价）。
 //
-// 缓存未命中（首次请求）：全部保持为 InputTokens，按标准 input 1x 计价。
-// 不使用 CacheCreationTokens 避免首次请求因 1.25x 写入价格反而更贵，
+// 缓存未命中（首次请求）：全部保持为标准输入，按标准 input 1x 计价。
+// 不使用缓存创建 Token 避免首次请求因 1.25x 写入价格反而更贵，
 // 且 Core 费用明细面板不显示缓存创建成本行导致金额对不上。
 func applyCacheSimulation(inputTokens int, cacheHit bool) (nonCachedInput, cachedInput int) {
 	if inputTokens <= 0 {

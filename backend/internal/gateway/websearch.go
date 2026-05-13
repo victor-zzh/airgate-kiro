@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
@@ -382,15 +382,13 @@ func streamWebSearchSSE(w http.ResponseWriter, results *webSearchResults, query,
 	))
 	emit("message_stop", `{"type":"message_stop"}`)
 
+	usage := newTokenUsage(model, inputTokens, outputTokens, 0, time.Since(start).Milliseconds())
+	fillUsageCost(usage)
+
 	return sdk.ForwardOutcome{
 		Kind:     sdk.OutcomeSuccess,
 		Upstream: sdk.UpstreamResponse{StatusCode: http.StatusOK},
-		Usage: &sdk.Usage{
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-			Model:        model,
-			FirstTokenMs: time.Since(start).Milliseconds(),
-		},
+		Usage:    usage,
 	}
 }
 
@@ -441,15 +439,13 @@ func bufferWebSearchResponse(w http.ResponseWriter, results *webSearchResults, q
 		w.Write(respBody)
 	}
 
+	usage := newTokenUsage(model, inputTokens, outputTokens, 0, time.Since(start).Milliseconds())
+	fillUsageCost(usage)
+
 	return sdk.ForwardOutcome{
 		Kind:     sdk.OutcomeSuccess,
 		Upstream: sdk.UpstreamResponse{StatusCode: http.StatusOK, Body: respBody},
-		Usage: &sdk.Usage{
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-			Model:        model,
-			FirstTokenMs: time.Since(start).Milliseconds(),
-		},
+		Usage:    usage,
 	}
 }
 

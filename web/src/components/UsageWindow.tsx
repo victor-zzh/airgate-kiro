@@ -1,3 +1,5 @@
+import type { AccountSurfaceProps } from '@doudou-start/airgate-theme/plugin';
+
 interface UsageWindowItem {
   key?: string;
   label: string;
@@ -5,8 +7,16 @@ interface UsageWindowItem {
   reset_seconds: number;
 }
 
-interface UsageWindowProps {
-  windows: UsageWindowItem[];
+function getUsageWindows(context: AccountSurfaceProps['context']): UsageWindowItem[] {
+  const windows = context?.windows;
+  if (!Array.isArray(windows)) return [];
+  return windows.filter((item): item is UsageWindowItem => (
+    item !== null
+    && typeof item === 'object'
+    && typeof item.label === 'string'
+    && typeof item.used_percent === 'number'
+    && typeof item.reset_seconds === 'number'
+  ));
 }
 
 function formatReset(seconds: number) {
@@ -25,7 +35,10 @@ function usageColor(pct: number) {
   return 'var(--ag-danger)';
 }
 
-export function UsageWindow({ windows }: UsageWindowProps) {
+export function UsageWindow({ context }: AccountSurfaceProps) {
+  const windows = getUsageWindows(context);
+  if (windows.length === 0) return null;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.125rem', minWidth: 0, fontFamily: 'var(--ag-font-mono)' }}>
       {windows.map((w) => {

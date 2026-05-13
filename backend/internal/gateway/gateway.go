@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 const usageCacheTTL = 5 * time.Minute
 
 type usageCacheEntry struct {
-	quota      *sdk.QuotaInfo
+	quota      *quotaInfo
 	capturedAt time.Time
 }
 
@@ -135,7 +135,7 @@ func (g *KiroGateway) validateOAuth(ctx context.Context, account *sdk.Account) e
 	return nil
 }
 
-func (g *KiroGateway) QueryQuota(ctx context.Context, credentials map[string]string) (*sdk.QuotaInfo, error) {
+func (g *KiroGateway) QueryQuota(ctx context.Context, credentials map[string]string) (*quotaInfo, error) {
 	accountType := inferAccountType(credentials)
 
 	account := &sdk.Account{
@@ -161,7 +161,7 @@ func (g *KiroGateway) QueryQuota(ctx context.Context, credentials map[string]str
 	return quota, err
 }
 
-func (g *KiroGateway) queryUsageLimits(ctx context.Context, account *sdk.Account) (*sdk.QuotaInfo, error) {
+func (g *KiroGateway) queryUsageLimits(ctx context.Context, account *sdk.Account) (*quotaInfo, error) {
 	region := resolveRegion(account, g.ctx)
 	machineID := resolveMachineID(account)
 	host := fmt.Sprintf("q.%s.amazonaws.com", region)
@@ -212,10 +212,10 @@ func (g *KiroGateway) queryUsageLimits(ctx context.Context, account *sdk.Account
 			SubscriptionTitle string `json:"subscriptionTitle"`
 		} `json:"subscriptionInfo"`
 		UsageBreakdownList []struct {
-			CurrentUsage     float64  `json:"currentUsageWithPrecision"`
-			UsageLimit       float64  `json:"usageLimitWithPrecision"`
-			NextDateReset    *float64 `json:"nextDateReset"`
-			Bonuses          []struct {
+			CurrentUsage  float64  `json:"currentUsageWithPrecision"`
+			UsageLimit    float64  `json:"usageLimitWithPrecision"`
+			NextDateReset *float64 `json:"nextDateReset"`
+			Bonuses       []struct {
 				CurrentUsage float64 `json:"currentUsage"`
 				UsageLimit   float64 `json:"usageLimit"`
 				Status       string  `json:"status"`
@@ -232,7 +232,7 @@ func (g *KiroGateway) queryUsageLimits(ctx context.Context, account *sdk.Account
 		return nil, fmt.Errorf("usage limits parse error: %w", err)
 	}
 
-	quota := &sdk.QuotaInfo{
+	quota := &quotaInfo{
 		Currency: "requests",
 		Extra:    map[string]string{},
 	}
@@ -354,7 +354,7 @@ func (g *KiroGateway) handleExchangeCallback(ctx context.Context, body []byte) (
 		return g.handlePollAutoCallback(ctx, []byte(`{"session_id":"`+sessionID+`"}`))
 	}
 
-	result, err := exchangeCallbackByURL(ctx, g.oauthStore,raw.CallbackURL, g.client)
+	result, err := exchangeCallbackByURL(ctx, g.oauthStore, raw.CallbackURL, g.client)
 	if err != nil {
 		g.logger.Warn("oauth exchange failed", "error", err)
 		resp, _ := json.Marshal(map[string]string{"error": err.Error()})
@@ -384,7 +384,7 @@ func (g *KiroGateway) handleExchangeCallback(ctx context.Context, body []byte) (
 	resp, _ := json.Marshal(map[string]any{
 		"account_type": authMethod,
 		"account_name": result.Email,
-		"credentials": result.Credentials,
+		"credentials":  result.Credentials,
 	})
 	return http.StatusOK, nil, resp, nil
 }
@@ -415,7 +415,7 @@ func (g *KiroGateway) handlePollAutoCallback(ctx context.Context, body []byte) (
 		return http.StatusOK, nil, resp, nil
 	}
 
-	result, err := exchangeCallbackByURL(ctx, g.oauthStore,callbackURL, g.client)
+	result, err := exchangeCallbackByURL(ctx, g.oauthStore, callbackURL, g.client)
 	if err != nil {
 		g.logger.Warn("auto-callback exchange failed", "error", err)
 		resp, _ := json.Marshal(map[string]string{"error": err.Error()})
@@ -497,8 +497,8 @@ func (g *KiroGateway) handleUsageAccounts(ctx context.Context, body []byte) (int
 	}
 
 	now := time.Now()
-	result := sdk.AccountUsageAccountsResponse{
-		Accounts: make(map[string]sdk.AccountUsageInfo),
+	result := accountUsageAccountsResponse{
+		Accounts: make(map[string]accountUsageInfo),
 	}
 
 	for _, a := range accounts {
@@ -510,7 +510,7 @@ func (g *KiroGateway) handleUsageAccounts(ctx context.Context, body []byte) (int
 		if len(windows) == 0 {
 			continue
 		}
-		result.Accounts[strconv.FormatInt(a.ID, 10)] = sdk.AccountUsageInfo{
+		result.Accounts[strconv.FormatInt(a.ID, 10)] = accountUsageInfo{
 			UpdatedAt: now.UTC().Format(time.RFC3339),
 			Windows:   windows,
 		}
@@ -538,20 +538,20 @@ func (g *KiroGateway) handleUsageProbe(ctx context.Context, body []byte) (int, h
 
 	now := time.Now()
 	windows := g.buildUsageWindows(quota, now)
-	info := sdk.AccountUsageInfo{
+	info := accountUsageInfo{
 		UpdatedAt: now.UTC().Format(time.RFC3339),
 		Windows:   windows,
 	}
 
-	resp, _ := json.Marshal(sdk.AccountUsageAccountsResponse{
-		Accounts: map[string]sdk.AccountUsageInfo{
+	resp, _ := json.Marshal(accountUsageAccountsResponse{
+		Accounts: map[string]accountUsageInfo{
 			strconv.FormatInt(req.ID, 10): info,
 		},
 	})
 	return http.StatusOK, nil, resp, nil
 }
 
-func (g *KiroGateway) getUsageCached(ctx context.Context, id int64, credentials map[string]string) *sdk.QuotaInfo {
+func (g *KiroGateway) getUsageCached(ctx context.Context, id int64, credentials map[string]string) *quotaInfo {
 	if val, ok := g.usageCache.Load(id); ok {
 		entry := val.(*usageCacheEntry)
 		if time.Since(entry.capturedAt) < usageCacheTTL {
@@ -561,7 +561,7 @@ func (g *KiroGateway) getUsageCached(ctx context.Context, id int64, credentials 
 	return g.probeUsage(ctx, id, credentials)
 }
 
-func (g *KiroGateway) probeUsage(ctx context.Context, id int64, credentials map[string]string) *sdk.QuotaInfo {
+func (g *KiroGateway) probeUsage(ctx context.Context, id int64, credentials map[string]string) *quotaInfo {
 	accountType := inferAccountType(credentials)
 	account := &sdk.Account{
 		ID:          id,
@@ -597,7 +597,7 @@ func (g *KiroGateway) probeUsage(ctx context.Context, id int64, credentials map[
 	return quota
 }
 
-func (g *KiroGateway) buildUsageWindows(quota *sdk.QuotaInfo, now time.Time) []sdk.AccountUsageWindow {
+func (g *KiroGateway) buildUsageWindows(quota *quotaInfo, now time.Time) []accountUsageWindow {
 	if quota == nil || quota.Total <= 0 {
 		return nil
 	}
@@ -613,8 +613,8 @@ func (g *KiroGateway) buildUsageWindows(quota *sdk.QuotaInfo, now time.Time) []s
 		}
 	}
 
-	return []sdk.AccountUsageWindow{
-		sdk.NewAccountUsageWindow("monthly", label, usedPercent, resetAt, now),
+	return []accountUsageWindow{
+		newAccountUsageWindow("monthly", label, usedPercent, resetAt, now),
 	}
 }
 

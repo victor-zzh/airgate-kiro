@@ -1,6 +1,6 @@
 package gateway
 
-import sdk "github.com/DouDOU-start/airgate-sdk"
+import sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 
 //go:generate go run ../../cmd/genmanifest
 
@@ -33,7 +33,9 @@ func buildPluginInfo() sdk.PluginInfo {
 		Author:      "airgate",
 		Type:        sdk.PluginTypeGateway,
 		FrontendWidgets: []sdk.FrontendWidget{
-			{Slot: sdk.SlotAccountForm, EntryFile: "index.js", Title: "账号表单"},
+			{Slot: sdk.SlotAccountCreate, EntryFile: "index.js", Title: "创建账号表单"},
+			{Slot: sdk.SlotAccountEdit, EntryFile: "index.js", Title: "编辑账号表单"},
+			{Slot: sdk.SlotAccountUsageWindow, EntryFile: "index.js", Title: "账号用量窗口"},
 		},
 		ConfigSchema: []sdk.ConfigField{
 			{Key: "kiro_version", Label: "Kiro IDE 版本号", Type: "string", Default: DefaultKiroVersion},

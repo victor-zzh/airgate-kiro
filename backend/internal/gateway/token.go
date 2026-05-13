@@ -12,16 +12,16 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 	"github.com/google/uuid"
 )
 
 const (
-	tokenExpireSkew       = 5 * time.Minute
-	refreshCooldown       = 60 * time.Second
-	refreshMaxRetries     = 2
-	refreshRetryDelay     = 1 * time.Second
-	defaultTokenLifetime  = 60 * time.Minute
+	tokenExpireSkew      = 5 * time.Minute
+	refreshCooldown      = 60 * time.Second
+	refreshMaxRetries    = 2
+	refreshRetryDelay    = 1 * time.Second
+	defaultTokenLifetime = 60 * time.Minute
 )
 
 type tokenManager struct {
@@ -48,7 +48,7 @@ type tokenResponse struct {
 }
 
 type idcTokenResponse struct {
-	AccessToken string `json:"accessToken"`
+	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken,omitempty"`
 	ExpiresIn    int64  `json:"expiresIn,omitempty"`
 }
@@ -330,4 +330,3 @@ func resolveAuthRegion(account *sdk.Account) string {
 	}
 	return DefaultRegion
 }
-

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 type headerConfig struct {

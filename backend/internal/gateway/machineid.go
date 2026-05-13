@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/DouDOU-start/airgate-sdk"
+	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
 
 var machineIDCache sync.Map // accountID -> string
