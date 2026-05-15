@@ -153,20 +153,6 @@ export function UsageCostDetail({ context }: UsageRecordSurfaceProps) {
   const record = recordFromContext(context);
   const isAdmin = context?.adminView !== false;
 
-  if (!isAdmin) {
-    return (
-      <div style={panelStyle}>
-        <div style={headerStyle}>
-          <div style={titleStyle}>费用</div>
-          {record.model ? <div style={subtitleStyle}>{record.model}</div> : null}
-        </div>
-        <div style={bodyStyle}>
-          <Row label="本次消费" value={money(record.actual_cost)} tone="var(--ag-warning)" />
-        </div>
-      </div>
-    );
-  }
-
   const details = contextArray<UsageCostDetailItem>(context, 'usageCostDetails', 'usage_cost_details');
   const rows = details.length > 0 ? details : fallbackDetails(record);
 
@@ -188,7 +174,7 @@ export function UsageCostDetail({ context }: UsageRecordSurfaceProps) {
 
   const hasRateInfo = !!record.service_tier
     || (record.rate_multiplier !== undefined && record.rate_multiplier > 0)
-    || (record.account_rate_multiplier !== undefined && record.account_rate_multiplier > 0 && record.account_rate_multiplier !== 1);
+    || (isAdmin && record.account_rate_multiplier !== undefined && record.account_rate_multiplier > 0 && record.account_rate_multiplier !== 1);
 
   return (
     <div style={panelStyle}>
@@ -214,19 +200,19 @@ export function UsageCostDetail({ context }: UsageRecordSurfaceProps) {
         {record.rate_multiplier !== undefined && record.rate_multiplier > 0 ? (
           <Row label="倍率" value={`${record.rate_multiplier.toFixed(2)}x`} />
         ) : null}
-        {record.account_rate_multiplier !== undefined && record.account_rate_multiplier > 0 ? (
+        {isAdmin && record.account_rate_multiplier !== undefined && record.account_rate_multiplier > 0 ? (
           <Row label="账号倍率" value={`${record.account_rate_multiplier.toFixed(2)}x`} />
         ) : null}
-        {record.sell_rate && record.sell_rate > 0 ? (
+        {isAdmin && record.sell_rate && record.sell_rate > 0 ? (
           <Row label="销售倍率" value={`${record.sell_rate.toFixed(2)}x`} />
         ) : null}
         {hasRateInfo ? <div style={dividerStyle} /> : null}
         <Row label="原始" value={money(record.total_cost)} tone="var(--ag-text)" />
-        {record.account_cost !== undefined ? (
+        {isAdmin && record.account_cost !== undefined ? (
           <Row label="账号计费" value={money(record.account_cost)} tone="var(--ag-success)" />
         ) : null}
-        <Row label="用户扣费" value={money(record.actual_cost)} tone="var(--ag-warning)" />
-        {record.sell_rate && record.sell_rate > 0 && record.billed_cost !== record.actual_cost ? (
+        <Row label="本次消费" value={money(record.actual_cost)} tone="var(--ag-warning)" />
+        {isAdmin && record.sell_rate && record.sell_rate > 0 && record.billed_cost !== record.actual_cost ? (
           <>
             <Row label="客户账面" value={money(record.billed_cost)} tone="var(--ag-primary)" />
             <Row label="利润" value={money((record.billed_cost ?? 0) - (record.actual_cost ?? 0))} tone="var(--ag-success)" />
