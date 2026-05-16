@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  GOPRIVATE: github.com/DouDOU-start/airgate-sdk
+
 jobs:
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
