@@ -3,7 +3,7 @@ module github.com/DouDOU-start/airgate-kiro/backend
 go 1.25.7
 
 require (
-	github.com/DouDOU-start/airgate-sdk v0.0.0-20260514110732-56680479df13
+	github.com/DouDOU-start/airgate-sdk v0.2.0
 	github.com/google/uuid v1.6.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
@@ -28,5 +28,3 @@ require (
 	google.golang.org/grpc v1.79.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
-
-replace github.com/DouDOU-start/airgate-sdk => ../../airgate-sdk

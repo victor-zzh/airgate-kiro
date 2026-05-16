@@ -26,20 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone airgate-sdk (go.work replace)
-        run: git clone --depth 1 https://github.com/DouDOU-start/airgate-sdk.git ../airgate-sdk
-
-      - name: Create go.work
-        run: |
-          cat > go.work <<'EOF'
-          go 1.25.7
-
-          use (
-              ./backend
-              ../airgate-sdk
-          )
-          EOF
-
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.1
@@ -49,9 +35,6 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Build @airgate/theme
-        run: cd ../airgate-sdk/theme && pnpm install --frozen-lockfile && pnpm run build
 
       - name: Build frontend
         run: cd web && pnpm install --frozen-lockfile && pnpm run build
