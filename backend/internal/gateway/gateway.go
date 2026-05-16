@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -136,9 +137,14 @@ func (g *KiroGateway) validateOAuth(ctx context.Context, account *sdk.Account) e
 }
 
 func (g *KiroGateway) QueryQuota(ctx context.Context, credentials map[string]string) (*quotaInfo, error) {
+	return g.queryQuota(ctx, 0, credentials)
+}
+
+func (g *KiroGateway) queryQuota(ctx context.Context, accountID int64, credentials map[string]string) (*quotaInfo, error) {
 	accountType := inferAccountType(credentials)
 
 	account := &sdk.Account{
+		ID:          accountID,
 		Type:        accountType,
 		Credentials: credentials,
 	}
@@ -306,6 +312,8 @@ func (g *KiroGateway) HandleRequest(ctx context.Context, method, path, query str
 		return g.handleDeviceComplete(ctx, body)
 	case "oauth/status":
 		return g.handlePollAutoCallback(ctx, body)
+	case "accounts/quota":
+		return g.handleAccountQuota(ctx, body)
 	case "usage/accounts":
 		return g.handleUsageAccounts(ctx, body)
 	case "usage/probe":
@@ -484,6 +492,67 @@ func (g *KiroGateway) handleDeviceComplete(ctx context.Context, body []byte) (in
 	return http.StatusOK, nil, resp, nil
 }
 
+func (g *KiroGateway) handleAccountQuota(ctx context.Context, body []byte) (int, http.Header, []byte, error) {
+	var req struct {
+		ID          int64             `json:"id"`
+		Credentials map[string]string `json:"credentials"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.ID == 0 {
+		resp, _ := json.Marshal(map[string]string{"error": "invalid request body"})
+		return http.StatusBadRequest, nil, resp, nil
+	}
+
+	credentials := cloneStringMap(req.Credentials)
+	quota, err := g.queryQuota(ctx, req.ID, credentials)
+	if err != nil {
+		resp, _ := json.Marshal(map[string]string{"error": err.Error()})
+		if errors.Is(err, sdk.ErrNotSupported) {
+			return http.StatusNotFound, nil, resp, nil
+		}
+		if errors.Is(err, ErrAccountDead) {
+			return http.StatusUnauthorized, nil, resp, nil
+		}
+		return http.StatusInternalServerError, nil, resp, nil
+	}
+	if quota == nil {
+		resp, _ := json.Marshal(map[string]string{"error": "quota refresh unsupported"})
+		return http.StatusNotFound, nil, resp, nil
+	}
+
+	extra := cloneStringMap(quota.Extra)
+	for _, key := range []string{"access_token", "refresh_token", "expires_at", "profile_arn"} {
+		if value := credentials[key]; value != "" {
+			extra[key] = value
+		}
+	}
+	if extra["email"] == "" {
+		if email := strings.TrimSpace(credentials["email"]); email != "" {
+			extra["email"] = email
+		} else if email := extractEmailFromJWT(credentials["access_token"]); email != "" {
+			extra["email"] = email
+		}
+	}
+	if extra["plan_type"] == "" {
+		if subscription := strings.TrimSpace(extra["subscription"]); subscription != "" {
+			extra["plan_type"] = normalizePlanName(subscription)
+		}
+	}
+	if quota.Total > 0 {
+		extra["quota_total"] = formatUsageNumber(quota.Total)
+		extra["quota_used"] = formatUsageNumber(quota.Used)
+		extra["quota_remaining"] = formatUsageNumber(quota.Remaining)
+	}
+	if quota.Currency != "" {
+		extra["quota_currency"] = quota.Currency
+	}
+
+	resp, _ := json.Marshal(map[string]any{
+		"expires_at": quota.ExpiresAt,
+		"extra":      extra,
+	})
+	return http.StatusOK, nil, resp, nil
+}
+
 // ── Usage 用量窗口 ──
 
 func (g *KiroGateway) handleUsageAccounts(ctx context.Context, body []byte) (int, http.Header, []byte, error) {
@@ -646,4 +715,12 @@ func formatUsageCompact(n float64) string {
 		return fmt.Sprintf("%.1fK", k)
 	}
 	return strconv.FormatInt(i, 10)
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
