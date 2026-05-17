@@ -43,6 +43,14 @@ func buildPluginInfo() sdk.PluginInfo {
 			{Key: "default_region", Label: "默认 AWS Region", Type: "string", Default: DefaultRegion},
 			{Key: "kiro_commit", Label: "Kiro IDE Commit Hash", Type: "string", Default: DefaultKiroCommit},
 		},
+		Metadata: map[string]string{
+			"account.oauth_plans": `[
+				{"key":"free","label":"Free","credential_key":"plan_type","match":"contains","matches":["Free"]},
+				{"key":"pro","label":"Pro","credential_key":"plan_type","match":"contains","matches":["Pro"]},
+				{"key":"pro_plus","label":"Pro+","credential_key":"plan_type","match":"contains","matches":["Pro+","Pro Plus"]},
+				{"key":"power","label":"Power","credential_key":"plan_type","match":"contains","matches":["Power"]}
+			]`,
+		},
 		AccountTypes: []sdk.AccountType{
 			{
 				Key:         "oauth",
