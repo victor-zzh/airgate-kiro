@@ -85,6 +85,6 @@ func pluginRoutes() []sdk.RouteDefinition {
 	return []sdk.RouteDefinition{
 		{Method: "POST", Path: "/v1/messages", Description: "Messages API"},
 		{Method: "POST", Path: "/v1/messages/count_tokens", Description: "Token 计数"},
-		{Method: "GET", Path: "/v1/models", Description: "模型列表"},
+		{Method: "GET", Path: "/v1/models", Description: "模型列表", Metadata: map[string]string{"metadata_only": "true"}},
 	}
 }
