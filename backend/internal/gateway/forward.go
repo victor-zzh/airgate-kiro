@@ -147,10 +147,12 @@ func (g *KiroGateway) doForward(ctx context.Context, req *sdk.ForwardRequest, lo
 		"host", httpReq.Header.Get("Host"),
 	)
 
-	resp, err := g.client.Do(httpReq)
+	streamable := req.Stream && req.Writer != nil
+	resp, cancel, err := g.doStreamableUpstream(ctx, httpReq, streamable)
 	if err != nil {
 		return transientOutcome("upstream request failed: " + err.Error())
 	}
+	defer cancel()
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
@@ -162,6 +164,70 @@ func (g *KiroGateway) doForward(ctx context.Context, req *sdk.ForwardRequest, lo
 		return streamKiroToSSE(ctx, resp.Body, req.Writer, convCtx, start)
 	}
 	return bufferKiroResponse(ctx, resp.Body, req.Writer, convCtx, start)
+}
+
+const (
+	defaultFirstByteTimeout  = 60 * time.Second
+	defaultStreamIdleTimeout = 60 * time.Second
+)
+
+// firstByteTimeout 流式等首响应头上限（可经 config first_byte_timeout 覆盖）。
+func (g *KiroGateway) firstByteTimeout() time.Duration {
+	if g == nil || g.ctx == nil || g.ctx.Config() == nil {
+		return defaultFirstByteTimeout
+	}
+	if d := g.ctx.Config().GetDuration("first_byte_timeout"); d > 0 {
+		return d
+	}
+	return defaultFirstByteTimeout
+}
+
+// streamIdleTimeout 流式读空闲上限（可经 config stream_idle_timeout 覆盖）。
+func (g *KiroGateway) streamIdleTimeout() time.Duration {
+	if g == nil || g.ctx == nil || g.ctx.Config() == nil {
+		return defaultStreamIdleTimeout
+	}
+	if d := g.ctx.Config().GetDuration("stream_idle_timeout"); d > 0 {
+		return d
+	}
+	return defaultStreamIdleTimeout
+}
+
+// doStreamableUpstream 执行上游请求并统一管理流式超时。
+//
+// stream=true 时：去掉总超时（避免仍在持续输出的长 Event Stream 被"总耗时"掐断），
+// 首字节计时器仅约束"等响应头"阶段（头到即解除），返回的 resp.Body 被读空闲守卫包装——
+// 流持续输出就不掐断，连续静默超过 stream_idle_timeout 才中止。
+// stream=false 时：沿用共享 client 的总超时（720s），行为不变。
+// 调用方必须 defer 返回的 cancel；err != nil 时 cancel 已被调用且返回 nil。
+func (g *KiroGateway) doStreamableUpstream(ctx context.Context, httpReq *http.Request, stream bool) (*http.Response, context.CancelFunc, error) {
+	reqCtx, cancel := context.WithCancel(ctx)
+	httpReq = httpReq.WithContext(reqCtx)
+
+	var firstByteTimer *time.Timer
+	if stream {
+		firstByteTimer = time.AfterFunc(g.firstByteTimeout(), cancel)
+	}
+
+	client := g.client
+	if stream {
+		// 复制一份 client 去掉总超时，共用底层 Transport（连接池）。
+		c := *g.client
+		c.Timeout = 0
+		client = &c
+	}
+	resp, err := client.Do(httpReq)
+	if firstByteTimer != nil {
+		firstByteTimer.Stop()
+	}
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	if stream {
+		resp.Body = newStallGuardBody(resp.Body, g.streamIdleTimeout(), cancel)
+	}
+	return resp, cancel, nil
 }
 
 func (g *KiroGateway) handleErrorResponse(resp *http.Response, req *sdk.ForwardRequest, logger *slog.Logger) sdk.ForwardOutcome {
