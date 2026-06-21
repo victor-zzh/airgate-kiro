@@ -4,7 +4,7 @@ id: gateway-kiro
 name: Kiro 网关
 version: 1.0.0
 description: Kiro (AWS CodeWhisperer) 反代网关，兼容 Anthropic Messages API
-author: airgate
+author: hopbase
 type: gateway
 min_core_version: 1.0.0
 dependencies: []
