@@ -32,6 +32,9 @@ func buildPluginInfo() sdk.PluginInfo {
 		Description: "Kiro (AWS CodeWhisperer) 反代网关，兼容 Anthropic Messages API",
 		Author:      "hopbase",
 		Type:        sdk.PluginTypeGateway,
+		Capabilities: []sdk.Capability{
+			sdk.CapabilityForHostMethod(hostMethodModelsCatalog),
+		},
 		FrontendWidgets: []sdk.FrontendWidget{
 			{Slot: sdk.SlotAccountCreate, EntryFile: "index.js", Title: "创建账号表单"},
 			{Slot: sdk.SlotAccountEdit, EntryFile: "index.js", Title: "编辑账号表单"},

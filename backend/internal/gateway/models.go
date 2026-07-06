@@ -49,22 +49,29 @@ var pricingRegistry = map[string]pricingSpec{
 var fallbackPricing = pricingSpec{3.0, 0.3, 3.75, 6.0, 15.0} // Sonnet 4.6
 
 func lookupPricing(modelID string) pricingSpec {
-	if p, ok := pricingRegistry[modelID]; ok {
+	reg := activePricingRegistry()
+	if p, ok := reg[modelID]; ok {
 		return p
 	}
 	lower := strings.ToLower(modelID)
-	for id, p := range pricingRegistry {
+	for id, p := range reg {
 		if strings.HasPrefix(modelID, id) {
 			return p
 		}
 	}
 	switch {
 	case strings.Contains(lower, "opus"):
-		return pricingRegistry["claude-opus-4-7"]
+		if p, ok := reg["claude-opus-4-7"]; ok {
+			return p
+		}
 	case strings.Contains(lower, "haiku"):
-		return pricingRegistry["claude-haiku-4-5-20251001"]
+		if p, ok := reg["claude-haiku-4-5-20251001"]; ok {
+			return p
+		}
 	case strings.Contains(lower, "sonnet"):
-		return pricingRegistry["claude-sonnet-4-6"]
+		if p, ok := reg["claude-sonnet-4-6"]; ok {
+			return p
+		}
 	}
 	return fallbackPricing
 }
@@ -151,6 +158,13 @@ func priceMetadata(price float64) map[string]string {
 
 // MapToKiroModel 将 Anthropic 模型名映射到 Kiro 模型 ID 和上下文窗口大小。
 func MapToKiroModel(model string) (kiroID string, contextWindow int, err error) {
+	trimmed := strings.TrimSpace(model)
+	for _, m := range activeKiroModels() {
+		if strings.EqualFold(trimmed, m.AnthropicID) || strings.EqualFold(trimmed, m.KiroID) {
+			return m.KiroID, m.ContextWindow, nil
+		}
+	}
+
 	lower := strings.ToLower(model)
 
 	if strings.Contains(lower, "sonnet") {
@@ -176,7 +190,7 @@ func MapToKiroModel(model string) (kiroID string, contextWindow int, err error) 
 
 // MapToAnthropicModel 将 Kiro 模型 ID 反向映射为 Anthropic 模型名。
 func MapToAnthropicModel(kiroID string) string {
-	for _, m := range kiroModels {
+	for _, m := range activeKiroModels() {
 		if m.KiroID == kiroID {
 			return m.AnthropicID
 		}
@@ -185,8 +199,9 @@ func MapToAnthropicModel(kiroID string) string {
 }
 
 func allModelInfos() []sdk.ModelInfo {
-	out := make([]sdk.ModelInfo, len(kiroModels))
-	for i, m := range kiroModels {
+	models := visibleKiroModels()
+	out := make([]sdk.ModelInfo, len(models))
+	for i, m := range models {
 		out[i] = sdk.ModelInfo{
 			ID:              m.AnthropicID,
 			Name:            m.Name,
@@ -201,7 +216,7 @@ func allModelInfos() []sdk.ModelInfo {
 func buildModelsResponse() []byte {
 	var sb strings.Builder
 	sb.WriteString(`{"object":"list","data":[`)
-	for i, m := range kiroModels {
+	for i, m := range visibleKiroModels() {
 		if i > 0 {
 			sb.WriteByte(',')
 		}

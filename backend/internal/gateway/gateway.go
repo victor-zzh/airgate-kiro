@@ -29,11 +29,13 @@ type KiroGateway struct {
 	logger        *slog.Logger
 	ctx           sdk.PluginContext
 	tokenMgr      *tokenManager
+	host          sdk.Host
 	client        *http.Client
 	headerCfg     headerConfig
 	oauthStore    *oauthSessionStore
 	callbackLn    *callbackListener
 	cancelCleanup context.CancelFunc
+	catalogCancel context.CancelFunc
 	usageCache    sync.Map // accountID (int64) -> *usageCacheEntry
 }
 
@@ -44,6 +46,9 @@ func (g *KiroGateway) Info() sdk.PluginInfo {
 func (g *KiroGateway) Init(ctx sdk.PluginContext) error {
 	g.logger = ctx.Logger()
 	g.ctx = ctx
+	if hostAware, ok := ctx.(sdk.HostAware); ok {
+		g.host = hostAware.Host()
+	}
 	g.headerCfg = defaultHeaderConfig(ctx)
 	g.tokenMgr = newTokenManager(g.logger, g.headerCfg)
 	g.oauthStore = newOAuthSessionStore()
@@ -69,10 +74,17 @@ func (g *KiroGateway) Init(ctx sdk.PluginContext) error {
 
 func (g *KiroGateway) Start(ctx context.Context) error {
 	g.logger.Info("kiro gateway started")
+	catalogCtx, cancel := context.WithCancel(context.Background())
+	g.catalogCancel = cancel
+	go g.runCatalogRefresh(catalogCtx)
 	return nil
 }
 
 func (g *KiroGateway) Stop(ctx context.Context) error {
+	if g.catalogCancel != nil {
+		g.catalogCancel()
+		g.catalogCancel = nil
+	}
 	if g.cancelCleanup != nil {
 		g.cancelCleanup()
 	}
