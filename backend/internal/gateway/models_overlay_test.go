@@ -102,3 +102,39 @@ func TestKiroCatalogOverlay_MalformedJSONDoesNotReplaceSnapshot(t *testing.T) {
 		t.Fatalf("解析失败不应替换旧快照: before=%+v after=%+v", before, after)
 	}
 }
+
+// TestKiroCatalogOverlay_NewModelDerivesFromInput 新增模型只填 input 时,其余价格按
+// Anthropic 官方比例推导(缓存读×0.1/写5m×1.25/写1h×2/输出×5),不沿用推断家族绝对价。
+func TestKiroCatalogOverlay_NewModelDerivesFromInput(t *testing.T) {
+	withCatalogOverlay(t, `[
+	  {"id":"claude-haiku-5","kiro_id":"kiro-haiku-5","name":"Claude Haiku 5","pricing":{"input":1}}
+	]`)
+
+	p := lookupPricing("claude-haiku-5")
+	if p.InputPrice != 1 {
+		t.Fatalf("input 未生效: %+v", p)
+	}
+	if p.CachedPrice != 0.1 || p.CacheCreationPrice != 1.25 || p.CacheCreation1hPrice != 2 {
+		t.Errorf("缓存价应按比例推导(0.1/1.25/2), got %v/%v/%v",
+			p.CachedPrice, p.CacheCreationPrice, p.CacheCreation1hPrice)
+	}
+	if p.OutputPrice != 5 {
+		t.Errorf("输出价应推导为输入×5=5, got %v", p.OutputPrice)
+	}
+}
+
+// TestKiroCatalogOverlay_NewModelExplicitBeatsDerived 显式给出的价格压过推导值。
+func TestKiroCatalogOverlay_NewModelExplicitBeatsDerived(t *testing.T) {
+	withCatalogOverlay(t, `[
+	  {"id":"claude-fable-5-1","pricing":{"input":10,"output":40}}
+	]`)
+
+	p := lookupPricing("claude-fable-5-1")
+	if p.OutputPrice != 40 {
+		t.Errorf("显式 output 应生效: %v", p.OutputPrice)
+	}
+	if p.CachedPrice != 1 || p.CacheCreationPrice != 12.5 || p.CacheCreation1hPrice != 20 {
+		t.Errorf("未显式的缓存价仍按比例推导(1/12.5/20), got %v/%v/%v",
+			p.CachedPrice, p.CacheCreationPrice, p.CacheCreation1hPrice)
+	}
+}

@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 
 	sdk "github.com/DouDOU-start/airgate-sdk/sdkgo"
 )
@@ -62,18 +64,51 @@ func lookupPricing(modelID string) pricingSpec {
 	switch {
 	case strings.Contains(lower, "opus"):
 		if p, ok := reg["claude-opus-4-7"]; ok {
+			warnPricingFallbackOnce(modelID, "claude-opus-4-7")
 			return p
 		}
 	case strings.Contains(lower, "haiku"):
 		if p, ok := reg["claude-haiku-4-5-20251001"]; ok {
+			warnPricingFallbackOnce(modelID, "claude-haiku-4-5-20251001")
 			return p
 		}
 	case strings.Contains(lower, "sonnet"):
 		if p, ok := reg["claude-sonnet-4-6"]; ok {
+			warnPricingFallbackOnce(modelID, "claude-sonnet-4-6")
 			return p
 		}
 	}
+	warnPricingFallbackOnce(modelID, "sonnet-4-6-fallback")
 	return fallbackPricing
+}
+
+// 兜底计费告警去重表。上限防被垃圾模型名撑爆内存;到达上限后不再新增告警(已告警的仍去重)。
+const pricingFallbackWarnCap = 512
+
+var (
+	pricingFallbackWarnMu sync.Mutex
+	pricingFallbackWarned = map[string]struct{}{}
+)
+
+// warnPricingFallbackOnce 未注册模型按推断/兜底价计费时告警一次(按模型去重)。
+// 精确/前缀匹配是同模型的日期变体不告警;关键词推断和 Sonnet 兜底才是"猜价",
+// 看到这条日志就该去后台「模型目录」给该模型配置官方价。
+func warnPricingFallbackOnce(modelID, billedAs string) {
+	pricingFallbackWarnMu.Lock()
+	_, seen := pricingFallbackWarned[modelID]
+	full := len(pricingFallbackWarned) >= pricingFallbackWarnCap
+	if !seen && !full {
+		pricingFallbackWarned[modelID] = struct{}{}
+	}
+	pricingFallbackWarnMu.Unlock()
+	if seen || full {
+		return
+	}
+	slog.Warn("model_pricing_fallback",
+		"model", modelID,
+		"billed_as", billedAs,
+		"hint", "未注册模型正按推断价计费,请到后台「模型目录」为其配置官方价",
+	)
 }
 
 func fillUsageCost(usage *sdk.Usage) {

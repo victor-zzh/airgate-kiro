@@ -140,6 +140,12 @@ func parseCatalogOverlay(raw string) (*catalogOverlay, error) {
 		basePrice, priceOK := pricing[m.AnthropicID]
 		if !priceOK {
 			basePrice = inferPricing(m.AnthropicID, pricing)
+			// 新增模型给出 input 标准价时,其余价格按 Anthropic 官方比例从 input 推导
+			// (缓存读×0.1/写5m×1.25/写1h×2/输出×5),不沿用推断家族的绝对价;
+			// 条目显式给出的价格随后在 applyOverlayToPricing 中覆盖推导值。
+			if e.Pricing != nil && e.Pricing.Input > 0 {
+				basePrice = derivePricingFromInput(basePrice, e.Pricing.Input)
+			}
 		}
 		if e.Pricing != nil {
 			basePrice = applyOverlayToPricing(basePrice, *e.Pricing)
@@ -219,6 +225,16 @@ func applyOverlayToPricing(base pricingSpec, p overlayPricing) pricingSpec {
 	if p.Output > 0 {
 		base.OutputPrice = p.Output
 	}
+	return base
+}
+
+// derivePricingFromInput 按 Anthropic 官方比例惯例从 input 标准价推导整套价格。
+func derivePricingFromInput(base pricingSpec, input float64) pricingSpec {
+	base.InputPrice = input
+	base.CachedPrice = input * 0.1
+	base.CacheCreationPrice = input * 1.25
+	base.CacheCreation1hPrice = input * 2
+	base.OutputPrice = input * 5
 	return base
 }
 

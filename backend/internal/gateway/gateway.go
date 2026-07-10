@@ -37,6 +37,10 @@ type KiroGateway struct {
 	cancelCleanup context.CancelFunc
 	catalogCancel context.CancelFunc
 	usageCache    sync.Map // accountID (int64) -> *usageCacheEntry
+
+	// 模型清单推送状态,仅由 runCatalogRefresh 单 goroutine 读写
+	catalogPushed    bool
+	pushedCatalogRaw string
 }
 
 func (g *KiroGateway) Info() sdk.PluginInfo {

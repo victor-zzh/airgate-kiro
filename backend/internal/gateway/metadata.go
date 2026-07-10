@@ -34,6 +34,7 @@ func buildPluginInfo() sdk.PluginInfo {
 		Type:        sdk.PluginTypeGateway,
 		Capabilities: []sdk.Capability{
 			sdk.CapabilityForHostMethod(hostMethodModelsCatalog),
+			sdk.CapabilityForHostMethod(hostMethodModelsRefresh),
 		},
 		FrontendWidgets: []sdk.FrontendWidget{
 			{Slot: sdk.SlotAccountCreate, EntryFile: "index.js", Title: "创建账号表单"},
