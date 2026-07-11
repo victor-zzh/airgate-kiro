@@ -3,6 +3,7 @@ package gateway
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -243,9 +244,32 @@ func allModelInfos() []sdk.ModelInfo {
 			ContextWindow:   m.ContextWindow,
 			MaxOutputTokens: m.MaxOutput,
 			Capabilities:    []string{sdk.ModelCapChat, sdk.ModelCapReasoning},
+			Metadata:        priceHintMetadata(lookupPricing(m.AnthropicID), nil),
 		}
 	}
 	return out
+}
+
+// priceHintMetadata 把内置基础价编进 ModelInfo.Metadata 的 price.* 键。
+//
+// 唯一消费方是 core 后台「模型目录」编辑器（展示各模型的内置地板价，供管理员
+// 对照改价）。计费不读这里——仍由 Forward 按 pricingRegistry 计算（勿与本文件
+// 里计费用的 priceMetadata 混淆）。
+func priceHintMetadata(p pricingSpec, meta map[string]string) map[string]string {
+	if meta == nil {
+		meta = make(map[string]string, 5)
+	}
+	put := func(key string, v float64) {
+		if v > 0 {
+			meta[key] = strconv.FormatFloat(v, 'f', -1, 64)
+		}
+	}
+	put("price.input", p.InputPrice)
+	put("price.cached_input", p.CachedPrice)
+	put("price.cache_write_5m", p.CacheCreationPrice)
+	put("price.cache_write_1h", p.CacheCreation1hPrice)
+	put("price.output", p.OutputPrice)
+	return meta
 }
 
 func buildModelsResponse() []byte {
