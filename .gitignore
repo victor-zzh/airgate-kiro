@@ -7,7 +7,6 @@ tmp/
 web/dist/
 backend/internal/gateway/webdist/*
 !backend/internal/gateway/webdist/
-!backend/internal/gateway/webdist/placeholder.txt
 
 # Go
 *.exe
