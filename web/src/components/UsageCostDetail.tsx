@@ -207,7 +207,7 @@ export function UsageCostDetail({ context }: UsageRecordSurfaceProps) {
           <Row label="销售倍率" value={`${record.sell_rate.toFixed(2)}x`} />
         ) : null}
         {hasRateInfo ? <div style={dividerStyle} /> : null}
-        <Row label="原始" value={money(record.total_cost)} tone="var(--ag-text)" />
+        {isAdmin ? <Row label="原始" value={money(record.total_cost)} tone="var(--ag-text)" /> : null}
         {isAdmin && record.account_cost !== undefined ? (
           <Row label="账号计费" value={money(record.account_cost)} tone="var(--ag-success)" />
         ) : null}
